@@ -992,3 +992,98 @@ html[data-surface="overlay"] .shot-viewer {
     opacity: 0;
   }
 }
+
+/* ------------------------------------------------------------------ moving / resizing the panel */
+
+.chat-header.draggable {
+  cursor: grab;
+}
+
+.chat-header.draggable :is(button, input, .overlay-history-menu) {
+  cursor: auto;
+}
+
+.drag-grip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 30px;
+  margin-right: -4px;
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: grab;
+}
+
+.drag-grip:hover {
+  opacity: 1;
+}
+
+.resize-handle {
+  position: absolute;
+  z-index: 30;
+}
+
+.resize-handle.n,
+.resize-handle.s {
+  left: 14px;
+  right: 14px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.resize-handle.e,
+.resize-handle.w {
+  top: 14px;
+  bottom: 14px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.resize-handle.n {
+  top: 0;
+}
+
+.resize-handle.s {
+  bottom: 0;
+}
+
+.resize-handle.e {
+  right: 0;
+}
+
+.resize-handle.w {
+  left: 0;
+}
+
+.resize-handle.ne,
+.resize-handle.nw,
+.resize-handle.se,
+.resize-handle.sw {
+  width: 14px;
+  height: 14px;
+}
+
+.resize-handle.ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.resize-handle.sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.resize-handle.nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.resize-handle.se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}

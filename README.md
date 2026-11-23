@@ -20,7 +20,8 @@ By hand: `cd web; npm install; npm run build`, then `cd src-tauri; cargo run`. O
 installs the pinned ACP adapter of the agent into `%LOCALAPPDATA%\game-overlai\agents\`.
 
 Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel (the game's latest chat),
-`Esc` / ✕ — hide. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
+`Esc` / ✕ — hide. The panel moves by its header (grip in the compact field) and resizes by its
+edges, always inside the game window; its place is remembered per game. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
 the chat in a browser is at http://127.0.0.1:47823/.
 
 ## Layout

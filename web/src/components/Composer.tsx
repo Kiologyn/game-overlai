@@ -1,5 +1,5 @@
 import type { KeyboardEvent, RefObject } from "react";
-import { ArrowUp, Camera, CameraOff, Gamepad2, Square, X } from "lucide-react";
+import { ArrowUp, Camera, CameraOff, Gamepad2, GripVertical, Square, X } from "lucide-react";
 import type { GameInfo } from "../api/generated/GameInfo";
 
 interface Props {
@@ -17,6 +17,8 @@ interface Props {
   agentName: string;
   placeholder: string;
   inputRef?: RefObject<HTMLInputElement | null>;
+  /** Overlay, compact panel: a grip to move the panel by. */
+  onDragStart?: () => void;
 }
 
 export function Composer(props: Props) {
@@ -31,6 +33,19 @@ export function Composer(props: Props) {
 
   return (
     <div className="composer">
+      {props.onDragStart && (
+        <span
+          className="drag-grip"
+          title="Перетащить панель"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            props.onDragStart?.();
+          }}
+        >
+          <GripVertical size={14} aria-hidden />
+        </span>
+      )}
       {game && (
         <span className="chip game" title={`${game.title} (${game.exe})`}>
           <Gamepad2 size={14} aria-hidden />

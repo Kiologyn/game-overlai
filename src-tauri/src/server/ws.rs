@@ -96,7 +96,15 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         ClientMsg::UiSetMode { mode } if kind == ClientKind::Overlay => {
             overlay::run_on_main(&ctx.app, move |app| overlay::set_mode(app, mode))
         }
-        ClientMsg::UiHide | ClientMsg::UiSetMode { .. } => {}
+        ClientMsg::UiDragStart if kind == ClientKind::Overlay => {
+            debug!("ui.dragStart");
+            overlay::run_on_main(&ctx.app, overlay::start_drag)
+        }
+        ClientMsg::UiResizeStart { edge } if kind == ClientKind::Overlay => {
+            debug!("ui.resizeStart {edge:?}");
+            overlay::run_on_main(&ctx.app, move |app| overlay::start_resize(app, edge))
+        }
+        ClientMsg::UiHide | ClientMsg::UiSetMode { .. } | ClientMsg::UiDragStart | ClientMsg::UiResizeStart { .. } => {}
         ClientMsg::ChatSend { text, screenshot, new_chat } => chat::send(&ctx.state, &text, screenshot, new_chat),
         ClientMsg::ChatCancel => chat::cancel(&ctx.state),
         ClientMsg::ChatNew => chat::new_chat(&ctx.state),

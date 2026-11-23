@@ -16,6 +16,21 @@ pub enum PanelMode {
     Expanded,
 }
 
+/// Edge or corner of the overlay panel the user drags to resize it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum ResizeEdge {
+    N,
+    S,
+    E,
+    W,
+    Ne,
+    Nw,
+    Se,
+    Sw,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
@@ -234,6 +249,12 @@ pub enum ClientMsg {
     /// The panel switched between compact and expanded: resize the window (overlay only).
     #[serde(rename = "ui.setMode")]
     UiSetMode { mode: PanelMode },
+    /// The mouse went down on the panel's drag area: the core starts a native move (overlay only).
+    #[serde(rename = "ui.dragStart")]
+    UiDragStart,
+    /// The mouse went down on a resize handle (overlay only).
+    #[serde(rename = "ui.resizeStart")]
+    UiResizeStart { edge: ResizeEdge },
     #[serde(rename = "chat.send", rename_all = "camelCase")]
     ChatSend {
         text: String,
@@ -320,6 +341,8 @@ mod tests {
         assert!(matches!(m, ClientMsg::ChatSend { new_chat: true, screenshot: true, .. }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"ui.setMode","mode":"expanded"}"#).unwrap();
         assert!(matches!(m, ClientMsg::UiSetMode { mode: PanelMode::Expanded }));
+        let m: ClientMsg = serde_json::from_str(r#"{"type":"ui.resizeStart","edge":"nw"}"#).unwrap();
+        assert!(matches!(m, ClientMsg::UiResizeStart { edge: ResizeEdge::Nw }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"chat.open","id":"c1"}"#).unwrap();
         assert!(matches!(m, ClientMsg::ChatOpen { id } if id == "c1"));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"permission.respond","id":"p1","optionId":null}"#).unwrap();

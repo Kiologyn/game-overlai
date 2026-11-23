@@ -56,12 +56,23 @@ interface HeaderProps {
   onNewChat(): void;
   onOpenChat(id: string): void;
   onDeleteChat(id: string): void;
+  /** The mouse went down on the header (not on a control): move the panel. */
+  onDragStart?: () => void;
 }
 
-export function ChatHeader({ title, usage, agent, chats, chatId, onNewChat, onOpenChat, onDeleteChat }: HeaderProps) {
+export function ChatHeader(props: HeaderProps) {
+  const { title, usage, agent, chats, chatId, onNewChat, onOpenChat, onDeleteChat, onDragStart } = props;
   const [historyOpen, setHistoryOpen] = useState(false);
   return (
-    <div className="chat-header">
+    <div
+      className={`chat-header${onDragStart ? " draggable" : ""}`}
+      onPointerDown={(e) => {
+        if (!onDragStart || e.button !== 0) return;
+        if ((e.target as HTMLElement).closest("button, input, a, .overlay-history-menu")) return;
+        e.preventDefault();
+        onDragStart();
+      }}
+    >
       <AgentDot agent={agent} />
       <span className="chat-title">{title ?? "Новый чат"}</span>
       <UsageBadge usage={usage} />

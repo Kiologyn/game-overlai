@@ -4,6 +4,9 @@
 //!   compact  — only the input field
 //!   expanded — chat history above the field; the window grows upward
 //!
+//! The user can move the panel (header / grip) and resize it (edges) within the game window;
+//! where it ends up is remembered per game, relative to the game window (`history::PanelLayout`).
+//!
 //! The panel takes keyboard focus when shown and gives it back to the game when hidden.
 //! It may stay open without focus while the user clicks into the game.
 //! All functions here must run on the main thread (use `run_on_main`).
@@ -16,14 +19,19 @@ use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use windows::Win32::Foundation::RECT;
 use tracing::{debug, info, warn};
 
-use crate::protocol::{GameInfo, PanelMode, ServerMsg};
+use crate::history::PanelLayout;
+use crate::protocol::{GameInfo, PanelMode, ResizeEdge, ServerMsg};
 use crate::state::{AppState, Prefetch, Target};
 
 pub const LABEL: &str = "panel";
 /// Height of the input row, logical px. Must match `--composer-h` in the UI.
 pub const COMPACT_H: f64 = 56.0;
+/// Smallest panel the user can resize to, logical px.
+const MIN_W: f64 = 360.0;
+const MIN_H: f64 = 220.0;
 /// How long the hotkey waits for the game frame before showing the panel (~30 ms usually).
 const PREFETCH_WAIT: Duration = Duration::from_millis(250);
 
@@ -57,6 +65,12 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
         warn!("OVERLAI_DEBUG_CAPTURABLE: the panel is visible in screenshots");
     } else if !win32::exclude_from_capture(hwnd) {
         warn!("could not exclude the panel from screen capture");
+    }
+
+    // Moves and resizes by the user stay inside the game window; the result is remembered.
+    let on_moved = app.clone();
+    if !win32::limit_moves(hwnd, move || run_on_main(&on_moved, save_layout)) {
+        warn!("could not limit panel moves to the game window");
     }
 
     // Alt+F4 on the panel hides it instead of destroying it.
@@ -204,25 +218,117 @@ pub fn set_mode(app: &AppHandle, mode: PanelMode) {
     place(&st, &w, mode, game_hwnd);
 }
 
-/// Bottom-centre of the game's monitor; the bottom edge stays put when the panel expands.
+/// Panel layouts are kept per game (exe); "" = no game.
+fn layout_key(st: &AppState) -> String {
+    st.overlay.lock().unwrap().game.as_ref().map(|g| g.exe.to_lowercase()).unwrap_or_default()
+}
+
+/// Where the user left the panel over this game, or bottom-centre of it by default. The bottom
+/// edge stays put when the panel expands. Always inside the game window (`win32::panel_bounds`).
 /// Goes through Tauri so tao's view of the window stays in sync.
 fn place(st: &AppState, window: &WebviewWindow, mode: PanelMode, game_hwnd: isize) {
     let game = win32::hwnd(game_hwnd);
-    let (area, scale) = win32::placement_area(win32::is_alive(game).then_some(game));
+    let (b, scale) = win32::panel_bounds(win32::is_alive(game).then_some(game));
+    let saved = st.history.panel_layout(&layout_key(st));
     let cfg = &st.config.panel;
-    let margin = (cfg.bottom_margin * scale).round() as i32;
-    let max_h = (area.bottom - area.top - 2 * margin).max(1);
-    let w = ((cfg.width * scale).round() as i32).min(area.right - area.left);
+    let (bw, bh) = (b.right - b.left, b.bottom - b.top);
+    let px = |v: f64| (v * scale).round() as i32;
+    let (min_w, min_h) = (px(MIN_W).min(bw), px(MIN_H).min(bh));
+    let w = px(saved.map_or(cfg.width, |l| l.width)).clamp(min_w, bw);
     let h = match mode {
-        PanelMode::Compact => (COMPACT_H * scale).round() as i32,
-        PanelMode::Expanded => ((cfg.expanded_height * scale).round() as i32).min(max_h),
+        PanelMode::Compact => px(COMPACT_H).min(bh),
+        PanelMode::Expanded => px(saved.map_or(cfg.expanded_height, |l| l.height)).clamp(min_h, bh),
     };
-    let x = area.left + (area.right - area.left - w) / 2;
-    let y = area.bottom - margin - h;
+    let center = saved.map_or(b.left + bw / 2, |l| b.left + (l.center_x * bw as f64).round() as i32);
+    let bottom = saved.map_or(b.bottom - px(cfg.bottom_margin), |l| b.top + (l.bottom * bh as f64).round() as i32);
+    let mut r = RECT { left: center - w / 2, top: bottom - h, right: center - w / 2 + w, bottom };
+    win32::clamp_move(&mut r, &b);
+    win32::set_move_limits(win32::MoveLimits {
+        bounds: b,
+        min_w,
+        min_h,
+        fixed_h: (mode == PanelMode::Compact).then_some(h),
+    });
     debug!(
-        "place {mode:?}: area=({},{})-({},{}) scale={scale} -> {w}x{h} at ({x},{y})",
-        area.left, area.top, area.right, area.bottom
+        "place {mode:?}: bounds=({},{})-({},{}) scale={scale} saved={} -> {w}x{h} at ({},{})",
+        b.left,
+        b.top,
+        b.right,
+        b.bottom,
+        saved.is_some(),
+        r.left,
+        r.top
     );
     let _ = window.set_size(PhysicalSize::new(w as u32, h as u32));
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+    let _ = window.set_position(PhysicalPosition::new(r.left, r.top));
+}
+
+/// The UI's drag area was pressed: move the panel with the mouse (native move loop; the bounds
+/// are enforced in `win32::limit_moves`).
+pub fn start_drag(app: &AppHandle) {
+    if let Some(w) = panel(app) {
+        debug!("panel move started");
+        let _ = w.start_dragging();
+    }
+}
+
+/// A resize handle was pressed. The window is resizable only during the drag, so Windows can't
+/// resize it otherwise (snap, maximise).
+pub fn start_resize(app: &AppHandle, edge: ResizeEdge) {
+    let Some(w) = panel(app) else { return };
+    let w = w.as_ref().window(); // resize dragging is on the Window, not the WebviewWindow
+    let compact = state(app).overlay.lock().unwrap().mode == PanelMode::Compact;
+    if compact && !matches!(edge, ResizeEdge::E | ResizeEdge::W) {
+        return; // the compact panel only gets wider or narrower
+    }
+    use tauri_runtime::ResizeDirection as D;
+    let direction = match edge {
+        ResizeEdge::N => D::North,
+        ResizeEdge::S => D::South,
+        ResizeEdge::E => D::East,
+        ResizeEdge::W => D::West,
+        ResizeEdge::Ne => D::NorthEast,
+        ResizeEdge::Nw => D::NorthWest,
+        ResizeEdge::Se => D::SouthEast,
+        ResizeEdge::Sw => D::SouthWest,
+    };
+    debug!("panel resize started: {edge:?}");
+    let _ = w.set_resizable(true);
+    if let Err(e) = w.start_resize_dragging(direction) {
+        let _ = w.set_resizable(false);
+        warn!("resize: {e}");
+    }
+}
+
+/// A move or resize by the user ended: remember where the panel is over this game.
+fn save_layout(app: &AppHandle) {
+    let Some(w) = panel(app) else { return };
+    let _ = w.set_resizable(false);
+    let st = state(app);
+    let (mode, game_hwnd) = {
+        let ov = st.overlay.lock().unwrap();
+        (ov.mode, ov.game_hwnd)
+    };
+    let game = win32::hwnd(game_hwnd);
+    let (b, scale) = win32::panel_bounds(win32::is_alive(game).then_some(game));
+    let (bw, bh) = (b.right - b.left, b.bottom - b.top);
+    if bw <= 0 || bh <= 0 {
+        return;
+    }
+    let r = win32::window_rect(panel_hwnd(&w));
+    let (pw, ph) = (r.right - r.left, r.bottom - r.top);
+    let key = layout_key(&st);
+    let height = match mode {
+        PanelMode::Expanded => ph as f64 / scale,
+        // The compact panel only changes width: keep the expanded height.
+        PanelMode::Compact => st.history.panel_layout(&key).map_or(st.config.panel.expanded_height, |l| l.height),
+    };
+    let layout = PanelLayout {
+        width: pw as f64 / scale,
+        height,
+        center_x: ((r.left + pw / 2 - b.left) as f64 / bw as f64).clamp(0.0, 1.0),
+        bottom: ((r.bottom - b.top) as f64 / bh as f64).clamp(0.0, 1.0),
+    };
+    debug!("panel layout for {:?}: {layout:?}", if key.is_empty() { "-" } else { key.as_str() });
+    st.history.save_panel_layout(&key, &layout);
 }

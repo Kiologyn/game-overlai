@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isBusy, type Connection } from "../api/connection";
 import type { PanelMode } from "../api/generated/PanelMode";
+import type { ResizeEdge } from "../api/generated/ResizeEdge";
 import { useStoredFlag, useUiState } from "../api/hooks";
 import { AgentNotice, ChatHeader } from "../components/ChatHeader";
 import { Composer } from "../components/Composer";
@@ -54,6 +55,9 @@ export function Panel({ conn }: { conn: Connection }) {
   };
 
   const openLink = useCallback((url: string) => conn.send({ type: "ui.openUrl", url }), [conn]);
+  // The core runs the native move/resize loop (kept inside the game window, remembered per game).
+  const startDrag = useCallback(() => conn.send({ type: "ui.dragStart" }), [conn]);
+  const startResize = useCallback((edge: ResizeEdge) => conn.send({ type: "ui.resizeStart", edge }), [conn]);
 
   const game = mode === "expanded" ? (ui.chatGame ?? ui.overlay.game) : ui.overlay.game;
   const agentDown = ui.agent?.state === "error";
@@ -68,6 +72,7 @@ export function Panel({ conn }: { conn: Connection }) {
                 title={ui.title}
                 usage={ui.usage}
                 agent={ui.agent}
+                onDragStart={startDrag}
                 chats={ui.chats}
                 chatId={ui.chatId}
                 onNewChat={() => {
@@ -105,10 +110,35 @@ export function Panel({ conn }: { conn: Connection }) {
                 : "Сообщение…"
             }
             inputRef={inputRef}
+            onDragStart={mode === "compact" ? startDrag : undefined}
           />
+          <ResizeHandles edges={mode === "compact" ? COMPACT_EDGES : ALL_EDGES} onStart={startResize} />
           {ui.status !== "open" && <div className="offline" title="Нет связи с приложением" />}
         </div>
       </ShotViewerProvider>
     </OpenLinkContext.Provider>
+  );
+}
+
+const ALL_EDGES: ResizeEdge[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+/** The compact panel only gets wider or narrower. */
+const COMPACT_EDGES: ResizeEdge[] = ["e", "w"];
+
+/** Invisible strips along the panel's edges and corners to resize it by. */
+function ResizeHandles({ edges, onStart }: { edges: ResizeEdge[]; onStart(edge: ResizeEdge): void }) {
+  return (
+    <>
+      {edges.map((edge) => (
+        <div
+          key={edge}
+          className={`resize-handle ${edge}`}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            onStart(edge);
+          }}
+        />
+      ))}
+    </>
   );
 }
