@@ -11,6 +11,7 @@ import { Composer } from "../components/Composer";
 import { OpenLinkContext } from "../components/Markdown";
 import { MessageList } from "../components/MessageList";
 import { ShotViewerProvider } from "../components/Shots";
+import { PageTooltip } from "./PageTooltip";
 
 export function Panel({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
@@ -112,9 +113,11 @@ export function Panel({ conn }: { conn: Connection }) {
             inputRef={inputRef}
             onDragStart={mode === "compact" ? startDrag : undefined}
           />
-          <ResizeHandles edges={mode === "compact" ? COMPACT_EDGES : ALL_EDGES} onStart={startResize} />
           {ui.status !== "open" && <div className="offline" title="Нет связи с приложением" />}
+          <PageTooltip />
         </div>
+        {/* Outside .panel: its rounded overflow clip would cut the corner handles. */}
+        <ResizeHandles edges={mode === "compact" ? COMPACT_EDGES : ALL_EDGES} onStart={startResize} />
       </ShotViewerProvider>
     </OpenLinkContext.Provider>
   );

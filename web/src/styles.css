@@ -1020,7 +1020,7 @@ html[data-surface="overlay"] .shot-viewer {
 }
 
 .resize-handle {
-  position: absolute;
+  position: fixed; /* over the window's edges, outside the panel's rounded clip */
   z-index: 30;
 }
 
@@ -1086,4 +1086,23 @@ html[data-surface="overlay"] .shot-viewer {
   bottom: 0;
   right: 0;
   cursor: nwse-resize;
+}
+
+/* In-page tooltip of the overlay (see PageTooltip.tsx): placed by script, never takes the mouse. */
+.page-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  max-width: min(320px, calc(100vw - 8px));
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+  visibility: hidden;
 }
