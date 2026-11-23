@@ -15,7 +15,10 @@ const FRAME_HEIGHTS = [
   { value: 0, label: "полный размер окна" },
 ];
 
-type ProxyMode = "system" | "none" | "custom";
+/** Same steps as the core's (`overlay::ZOOM_STEPS`). */
+const ZOOMS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+
+type ProxyMode ="system" | "none" | "custom";
 
 const proxyMode = (p: string): ProxyMode => (p === "system" || p === "" ? "system" : p === "none" ? "none" : "custom");
 
@@ -168,8 +171,19 @@ export function SettingsPage({ conn }: { conn: Connection }) {
               <input type="number" min={220} max={1600} value={form.panelHeight} onChange={(e) => set("panelHeight", Number(e.target.value))} />
             </span>
           </div>
+          <div className="settings-row">
+            <span>Масштаб по умолчанию</span>
+            <select value={form.panelZoom} onChange={(e) => set("panelZoom", Number(e.target.value))}>
+              {ZOOMS.map((z) => (
+                <option key={z} value={z}>
+                  {Math.round(z * 100)}%
+                </option>
+              ))}
+            </select>
+          </div>
           <p className="field-hint">
-            Для игр, над которыми панель ещё не двигали. Положение и размер над каждой игрой запоминаются сами.
+            Для игр, над которыми панель ещё не двигали. Положение, размер и масштаб над каждой игрой запоминаются
+            сами. Масштаб панели: Ctrl + колесо мыши или Ctrl +/− над панелью, Ctrl+0 — вернуть масштаб по умолчанию.
           </p>
           <button
             type="button"

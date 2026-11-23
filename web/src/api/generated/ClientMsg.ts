@@ -2,11 +2,12 @@
 import type { PanelMode } from "./PanelMode";
 import type { ResizeEdge } from "./ResizeEdge";
 import type { SettingsValues } from "./SettingsValues";
+import type { ZoomStep } from "./ZoomStep";
 
 /**
  * UI -> core.
  */
-export type ClientMsg = { "type": "ui.hide" } | { "type": "ui.setMode", mode: PanelMode, } | { "type": "ui.dragStart" } | { "type": "ui.resizeStart", edge: ResizeEdge, } | { "type": "chat.send", text: string, screenshot: boolean, 
+export type ClientMsg = { "type": "ui.hide" } | { "type": "ui.setMode", mode: PanelMode, } | { "type": "ui.dragStart" } | { "type": "ui.resizeStart", edge: ResizeEdge, } | { "type": "ui.zoom", step: ZoomStep, } | { "type": "chat.send", text: string, screenshot: boolean, 
 /**
  * Start a new chat with this message (sent from the quick field).
  */

@@ -16,6 +16,16 @@ pub enum PanelMode {
     Expanded,
 }
 
+/// Zoom the overlay panel one step (Ctrl + wheel, Ctrl +/-) or back to the default (Ctrl+0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum ZoomStep {
+    In,
+    Out,
+    Reset,
+}
+
 /// Edge or corner of the overlay panel the user drags to resize it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -306,9 +316,11 @@ pub struct SettingsValues {
     pub proxy: String,
     /// Agent ids that must not connect without a proxy.
     pub require_proxy_for: Vec<String>,
-    /// Default panel size (logical px) for games the user hasn't placed it over yet.
+    /// Default panel size (logical px, at 100%) for games the user hasn't placed it over yet.
     pub panel_width: f64,
     pub panel_height: f64,
+    /// Default panel zoom (1.0 = 100%) for games it hasn't been zoomed over.
+    pub panel_zoom: f64,
     /// Height of frames sent to the agent (0 = full).
     pub agent_max_height: u32,
     pub lan_port: u16,
@@ -366,6 +378,9 @@ pub enum ClientMsg {
     /// The mouse went down on a resize handle (overlay only).
     #[serde(rename = "ui.resizeStart")]
     UiResizeStart { edge: ResizeEdge },
+    /// Scale the panel (content and window together) one step (overlay only).
+    #[serde(rename = "ui.zoom")]
+    UiZoom { step: ZoomStep },
     #[serde(rename = "chat.send", rename_all = "camelCase")]
     ChatSend {
         text: String,
@@ -478,6 +493,9 @@ pub enum ServerMsg {
     OverlayShow { mode: PanelMode, game: Option<GameInfo> },
     #[serde(rename = "overlay.hidden")]
     OverlayHidden,
+    /// The panel's zoom changed (or hit its limit): the panel shows it briefly (overlay only).
+    #[serde(rename = "overlay.zoom")]
+    OverlayZoom { zoom: f64 },
     /// Phone access over the local network (this PC's UI only: it carries the token).
     #[serde(rename = "lan.status")]
     LanStatus { status: LanStatus },

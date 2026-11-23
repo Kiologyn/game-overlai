@@ -21,9 +21,13 @@ proxy: string,
  */
 requireProxyFor: Array<string>, 
 /**
- * Default panel size (logical px) for games the user hasn't placed it over yet.
+ * Default panel size (logical px, at 100%) for games the user hasn't placed it over yet.
  */
 panelWidth: number, panelHeight: number, 
+/**
+ * Default panel zoom (1.0 = 100%) for games it hasn't been zoomed over.
+ */
+panelZoom: number, 
 /**
  * Height of frames sent to the agent (0 = full).
  */

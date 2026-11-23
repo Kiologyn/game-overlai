@@ -49,6 +49,7 @@ fn values_of(cfg: &Config) -> SettingsValues {
         require_proxy_for: cfg.network.require_proxy_for.clone(),
         panel_width: cfg.panel.width,
         panel_height: cfg.panel.expanded_height,
+        panel_zoom: crate::overlay::snap_zoom(cfg.panel.zoom),
         agent_max_height: cfg.capture.agent_max_height,
         lan_port: cfg.lan.port,
         notifications: cfg.notifications.enabled,
@@ -75,6 +76,9 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     if !(360.0..=2000.0).contains(&v.panel_width) || !(220.0..=1600.0).contains(&v.panel_height) {
         return Err("Размер панели: ширина от 360 до 2000, высота от 220 до 1600.".into());
     }
+    if !(0.5..=2.0).contains(&v.panel_zoom) {
+        return Err("Масштаб панели: от 50 до 200 %.".into());
+    }
     if v.agent_max_height != 0 && !(360..=2160).contains(&v.agent_max_height) {
         return Err("Высота кадра для агента: от 360 до 2160 (или «полный размер»).".into());
     }
@@ -92,6 +96,7 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
         .collect();
     cfg.panel.width = v.panel_width.round();
     cfg.panel.expanded_height = v.panel_height.round();
+    cfg.panel.zoom = crate::overlay::snap_zoom(v.panel_zoom);
     cfg.capture.agent_max_height = v.agent_max_height;
     cfg.lan.port = v.lan_port;
     cfg.notifications.enabled = v.notifications;
@@ -304,6 +309,7 @@ mod tests {
             proxy: "127.0.0.1:10808".into(),
             require_proxy_for: vec!["Claude".into(), "gemini".into()],
             panel_width: 700.4,
+            panel_zoom: 1.24,
             agent_max_height: 0,
             ..values()
         };
@@ -313,6 +319,7 @@ mod tests {
         assert_eq!(cfg.network.proxy, "127.0.0.1:10808");
         assert_eq!(cfg.network.require_proxy_for, vec!["claude".to_string()], "known agents only");
         assert_eq!(cfg.panel.width, 700.0);
+        assert_eq!(cfg.panel.zoom, 1.25, "snapped to a step");
         assert!(needs_restart(&Config::default(), &cfg));
         let mut only_keys = Config::default();
         apply(&SettingsValues { hotkey_chat: "alt+e".into(), ..values() }, &mut only_keys).unwrap();
@@ -328,6 +335,7 @@ mod tests {
             SettingsValues { agent: "gpt".into(), ..values() },
             SettingsValues { proxy: "my proxy".into(), ..values() },
             SettingsValues { panel_width: 100.0, ..values() },
+            SettingsValues { panel_zoom: 3.0, ..values() },
             SettingsValues { agent_max_height: 100, ..values() },
             SettingsValues { lan_port: 47823, ..values() },
         ];

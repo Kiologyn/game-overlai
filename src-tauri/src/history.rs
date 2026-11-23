@@ -81,14 +81,22 @@ const SCHEMA_V4: &str = "
 ALTER TABLE chats ADD COLUMN profile_key INTEGER;
 ";
 
+/// Panel zoom per game (NULL = rows saved before zoom existed: 100%).
+const SCHEMA_V5: &str = "
+ALTER TABLE panel_layouts ADD COLUMN zoom REAL;
+";
+
 /// Where the user put the overlay panel over a game, relative to the game window (so it stays
 /// in place when the game changes resolution or moves).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanelLayout {
+    /// Logical px, at `zoom`.
     pub width: f64,
     pub height: f64,
     pub center_x: f64,
     pub bottom: f64,
+    /// Scale of the panel's content (1.0 = 100%).
+    pub zoom: f64,
 }
 
 pub fn now_ms() -> i64 {
@@ -385,9 +393,17 @@ impl History {
     pub fn panel_layout(&self, game_exe: &str) -> Option<PanelLayout> {
         self.read("panel layout", |db| {
             db.query_row(
-                "SELECT width, height, center_x, bottom FROM panel_layouts WHERE game_exe = ?1",
+                "SELECT width, height, center_x, bottom, COALESCE(zoom, 1.0) FROM panel_layouts WHERE game_exe = ?1",
                 [game_exe],
-                |r| Ok(PanelLayout { width: r.get(0)?, height: r.get(1)?, center_x: r.get(2)?, bottom: r.get(3)? }),
+                |r| {
+                    Ok(PanelLayout {
+                        width: r.get(0)?,
+                        height: r.get(1)?,
+                        center_x: r.get(2)?,
+                        bottom: r.get(3)?,
+                        zoom: r.get(4)?,
+                    })
+                },
             )
             .optional()
         })
@@ -400,11 +416,12 @@ impl History {
     pub fn save_panel_layout(&self, game_exe: &str, l: &PanelLayout) {
         self.write("save panel layout", |db| {
             db.execute(
-                "INSERT INTO panel_layouts (game_exe, width, height, center_x, bottom, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO panel_layouts (game_exe, width, height, center_x, bottom, zoom, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT (game_exe) DO UPDATE SET width = excluded.width, height = excluded.height,
-                     center_x = excluded.center_x, bottom = excluded.bottom, updated_at = excluded.updated_at",
-                params![game_exe, l.width, l.height, l.center_x, l.bottom, now_ms()],
+                     center_x = excluded.center_x, bottom = excluded.bottom, zoom = excluded.zoom,
+                     updated_at = excluded.updated_at",
+                params![game_exe, l.width, l.height, l.center_x, l.bottom, l.zoom, now_ms()],
             )
             .map(drop)
         });
@@ -479,6 +496,9 @@ fn migrate(db: &Connection) -> rusqlite::Result<()> {
     }
     if version < 4 {
         db.execute_batch(&format!("BEGIN; {SCHEMA_V4} PRAGMA user_version = 4; COMMIT;"))?;
+    }
+    if version < 5 {
+        db.execute_batch(&format!("BEGIN; {SCHEMA_V5} PRAGMA user_version = 5; COMMIT;"))?;
     }
     Ok(())
 }
@@ -555,10 +575,10 @@ mod tests {
     fn panel_layouts() {
         let h = History::in_memory(std::env::temp_dir().join("overlai-unused"));
         assert_eq!(h.panel_layout("cs2.exe"), None);
-        let l = PanelLayout { width: 500.0, height: 400.0, center_x: 0.25, bottom: 0.9 };
+        let l = PanelLayout { width: 500.0, height: 400.0, center_x: 0.25, bottom: 0.9, zoom: 1.25 };
         h.save_panel_layout("cs2.exe", &l);
         h.save_panel_layout("CS2.EXE", &PanelLayout { width: 600.0, ..l }); // same game
-        assert_eq!(h.panel_layout("cs2.exe").map(|l| l.width), Some(600.0));
+        assert_eq!(h.panel_layout("cs2.exe").map(|l| (l.width, l.zoom)), Some((600.0, 1.25)));
         assert_eq!(h.panel_layout(""), None);
         h.clear_panel_layouts();
         assert_eq!(h.panel_layout("cs2.exe"), None);

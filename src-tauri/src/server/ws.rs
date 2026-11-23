@@ -124,7 +124,14 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             debug!("ui.resizeStart {edge:?}");
             overlay::run_on_main(&ctx.app, move |app| overlay::start_resize(app, edge))
         }
-        ClientMsg::UiHide | ClientMsg::UiSetMode { .. } | ClientMsg::UiDragStart | ClientMsg::UiResizeStart { .. } => {}
+        ClientMsg::UiZoom { step } if kind == ClientKind::Overlay => {
+            overlay::run_on_main(&ctx.app, move |app| overlay::zoom(app, step))
+        }
+        ClientMsg::UiHide
+        | ClientMsg::UiSetMode { .. }
+        | ClientMsg::UiDragStart
+        | ClientMsg::UiResizeStart { .. }
+        | ClientMsg::UiZoom { .. } => {}
         // From a phone the game is whatever runs on the PC now (the overlay may never have opened).
         ClientMsg::ChatSend { text, screenshot, new_chat } => {
             if ctx.lan {

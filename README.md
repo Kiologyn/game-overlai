@@ -21,7 +21,8 @@ installs the pinned ACP adapter of the agent into `%LOCALAPPDATA%\game-overlai\a
 
 Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel (the game's latest chat),
 `Esc` / ✕ — hide. The panel moves by its header (grip in the compact field) and resizes by its
-edges, always inside the game window; its place is remembered per game. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
+edges, always inside the game window; its place is remembered per game. Ctrl + wheel / Ctrl +/− over the
+panel zoom it (content and window together, 50–200%, per game), Ctrl+0 — back to the default zoom. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
 the chat in a browser is at http://127.0.0.1:47823/.
 
 Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys, agent (Claude Code or Codex),

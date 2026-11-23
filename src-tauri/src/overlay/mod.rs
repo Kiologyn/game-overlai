@@ -6,6 +6,8 @@
 //!
 //! The user can move the panel (header / grip) and resize it (edges) within the game window;
 //! where it ends up is remembered per game, relative to the game window (`history::PanelLayout`).
+//! Ctrl + wheel / Ctrl +/-/0 zoom it: the content and the window scale together, the bottom
+//! edge's centre stays put; the zoom is remembered per game too.
 //!
 //! The panel takes keyboard focus when shown and gives it back to the game when hidden.
 //! It may stay open without focus while the user clicks into the game.
@@ -23,7 +25,7 @@ use windows::Win32::Foundation::RECT;
 use tracing::{debug, info, warn};
 
 use crate::history::PanelLayout;
-use crate::protocol::{GameInfo, PanelMode, ResizeEdge, ServerMsg};
+use crate::protocol::{GameInfo, PanelMode, ResizeEdge, ServerMsg, ZoomStep};
 use crate::state::{AppState, Prefetch, Target};
 
 pub const LABEL: &str = "panel";
@@ -32,6 +34,24 @@ pub const COMPACT_H: f64 = 56.0;
 /// Smallest panel the user can resize to, logical px.
 const MIN_W: f64 = 360.0;
 const MIN_H: f64 = 220.0;
+/// Zoom steps, as in a browser.
+const ZOOM_STEPS: [f64; 11] = [0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+
+/// The zoom step nearest to `z` (config values, the settings page).
+pub fn snap_zoom(z: f64) -> f64 {
+    let z = if z.is_finite() { z } else { 1.0 };
+    ZOOM_STEPS.into_iter().min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs())).unwrap_or(1.0)
+}
+
+fn next_zoom(current: f64, step: ZoomStep, default: f64) -> f64 {
+    const EPS: f64 = 1e-6;
+    match step {
+        ZoomStep::In => ZOOM_STEPS.into_iter().find(|s| *s > current + EPS).unwrap_or(ZOOM_STEPS[ZOOM_STEPS.len() - 1]),
+        ZoomStep::Out => ZOOM_STEPS.into_iter().rev().find(|s| *s < current - EPS).unwrap_or(ZOOM_STEPS[0]),
+        ZoomStep::Reset => default,
+    }
+}
+
 /// How long the hotkey waits for the game frame before showing the panel (~30 ms usually).
 const PREFETCH_WAIT: Duration = Duration::from_millis(250);
 
@@ -258,13 +278,16 @@ fn place(st: &AppState, window: &WebviewWindow, mode: PanelMode, game_hwnd: isiz
     let (b, scale) = win32::panel_bounds(win32::is_alive(game).then_some(game));
     let saved = st.history.panel_layout(&layout_key(st));
     let cfg = st.config.read().unwrap().panel.clone();
+    // Saved sizes already are at the saved zoom; the defaults are at 100%.
+    let zoom = snap_zoom(saved.map_or(cfg.zoom, |l| l.zoom));
+    st.overlay.lock().unwrap().zoom = zoom;
     let (bw, bh) = (b.right - b.left, b.bottom - b.top);
     let px = |v: f64| (v * scale).round() as i32;
-    let (min_w, min_h) = (px(MIN_W).min(bw), px(MIN_H).min(bh));
-    let w = px(saved.map_or(cfg.width, |l| l.width)).clamp(min_w, bw);
+    let (min_w, min_h) = (px(MIN_W * zoom).min(bw), px(MIN_H * zoom).min(bh));
+    let w = px(saved.map_or(cfg.width * zoom, |l| l.width)).clamp(min_w, bw);
     let h = match mode {
-        PanelMode::Compact => px(COMPACT_H).min(bh),
-        PanelMode::Expanded => px(saved.map_or(cfg.expanded_height, |l| l.height)).clamp(min_h, bh),
+        PanelMode::Compact => px(COMPACT_H * zoom).min(bh),
+        PanelMode::Expanded => px(saved.map_or(cfg.expanded_height * zoom, |l| l.height)).clamp(min_h, bh),
     };
     let center = saved.map_or(b.left + bw / 2, |l| b.left + (l.center_x * bw as f64).round() as i32);
     let bottom = saved.map_or(b.bottom - px(cfg.bottom_margin), |l| b.top + (l.bottom * bh as f64).round() as i32);
@@ -277,7 +300,7 @@ fn place(st: &AppState, window: &WebviewWindow, mode: PanelMode, game_hwnd: isiz
         fixed_h: (mode == PanelMode::Compact).then_some(h),
     });
     debug!(
-        "place {mode:?}: bounds=({},{})-({},{}) scale={scale} saved={} -> {w}x{h} at ({},{})",
+        "place {mode:?}: bounds=({},{})-({},{}) scale={scale} zoom={zoom} saved={} -> {w}x{h} at ({},{})",
         b.left,
         b.top,
         b.right,
@@ -286,8 +309,60 @@ fn place(st: &AppState, window: &WebviewWindow, mode: PanelMode, game_hwnd: isiz
         r.left,
         r.top
     );
+    if let Err(e) = window.set_zoom(zoom) {
+        warn!("panel zoom: {e}");
+    }
     let _ = window.set_size(PhysicalSize::new(w as u32, h as u32));
     let _ = window.set_position(PhysicalPosition::new(r.left, r.top));
+}
+
+/// Ctrl + wheel / Ctrl +/-/0 on the panel: scale its content and the window together around
+/// the centre of the bottom edge. Scales the remembered layout (not the window as it is: that
+/// may be cut by the game window's edges) and places the panel from it, so zooming in and back
+/// out returns the panel to its size and place.
+pub fn zoom(app: &AppHandle, step: ZoomStep) {
+    let Some(w) = panel(app) else { return };
+    if !w.is_visible().unwrap_or(false) {
+        return;
+    }
+    let st = state(app);
+    let cfg = st.config.read().unwrap().panel.clone();
+    let (mode, game_hwnd, old) = {
+        let ov = st.overlay.lock().unwrap();
+        (ov.mode, ov.game_hwnd, ov.zoom)
+    };
+    let new = next_zoom(old, step, snap_zoom(cfg.zoom));
+    if (new - old).abs() < 1e-6 {
+        st.hub.send(Target::Overlay, ServerMsg::OverlayZoom { zoom: new }); // at the limit: show it
+        return;
+    }
+    let key = layout_key(&st);
+    let layout = match st.history.panel_layout(&key) {
+        Some(l) => l,
+        // Never moved over this game: the default size, where the panel is now.
+        None => {
+            let game = win32::hwnd(game_hwnd);
+            let (b, _) = win32::panel_bounds(win32::is_alive(game).then_some(game));
+            let (bw, bh) = (b.right - b.left, b.bottom - b.top);
+            if bw <= 0 || bh <= 0 {
+                return;
+            }
+            let r = win32::window_rect(panel_hwnd(&w));
+            PanelLayout {
+                width: cfg.width * old,
+                height: cfg.expanded_height * old,
+                center_x: ((r.left + (r.right - r.left) / 2 - b.left) as f64 / bw as f64).clamp(0.0, 1.0),
+                bottom: ((r.bottom - b.top) as f64 / bh as f64).clamp(0.0, 1.0),
+                zoom: old,
+            }
+        }
+    };
+    let k = new / old;
+    let layout = PanelLayout { width: layout.width * k, height: layout.height * k, zoom: new, ..layout };
+    debug!("panel zoom {old} -> {new}: {layout:?}");
+    st.history.save_panel_layout(&key, &layout);
+    place(&st, &w, mode, game_hwnd);
+    st.hub.send(Target::Overlay, ServerMsg::OverlayZoom { zoom: new });
 }
 
 /// The UI's drag area was pressed: move the panel with the mouse (native move loop; the bounds
@@ -345,17 +420,40 @@ fn save_layout(app: &AppHandle) {
     let r = win32::window_rect(panel_hwnd(&w));
     let (pw, ph) = (r.right - r.left, r.bottom - r.top);
     let key = layout_key(&st);
+    let zoom = st.overlay.lock().unwrap().zoom;
     let height = match mode {
         PanelMode::Expanded => ph as f64 / scale,
         // The compact panel only changes width: keep the expanded height.
-        PanelMode::Compact => st.history.panel_layout(&key).map_or(st.config.read().unwrap().panel.expanded_height, |l| l.height),
+        PanelMode::Compact => st
+            .history
+            .panel_layout(&key)
+            .map_or(st.config.read().unwrap().panel.expanded_height * zoom, |l| l.height),
     };
     let layout = PanelLayout {
         width: pw as f64 / scale,
         height,
         center_x: ((r.left + pw / 2 - b.left) as f64 / bw as f64).clamp(0.0, 1.0),
         bottom: ((r.bottom - b.top) as f64 / bh as f64).clamp(0.0, 1.0),
+        zoom,
     };
     debug!("panel layout for {:?}: {layout:?}", if key.is_empty() { "-" } else { key.as_str() });
     st.history.save_panel_layout(&key, &layout);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_steps() {
+        assert_eq!(snap_zoom(1.24), 1.25);
+        assert_eq!(snap_zoom(9.0), 2.0);
+        assert_eq!(snap_zoom(f64::NAN), 1.0);
+        assert_eq!(next_zoom(1.0, ZoomStep::In, 1.0), 1.1);
+        assert_eq!(next_zoom(1.0, ZoomStep::Out, 1.0), 0.9);
+        assert_eq!(next_zoom(1.3, ZoomStep::In, 1.0), 1.5, "off-step values go to the next step");
+        assert_eq!(next_zoom(2.0, ZoomStep::In, 1.0), 2.0);
+        assert_eq!(next_zoom(0.5, ZoomStep::Out, 1.0), 0.5);
+        assert_eq!(next_zoom(1.75, ZoomStep::Reset, 1.25), 1.25, "back to the default");
+    }
 }

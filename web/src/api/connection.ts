@@ -44,6 +44,9 @@ export interface UiState {
     game: GameInfo | null;
     /** Increments on every overlay.show, so the panel can react even if nothing else changed. */
     showSeq: number;
+    /** The panel's zoom (1 = 100%), and a counter of overlay.zoom messages (shows the badge). */
+    zoom: number;
+    zoomSeq: number;
   };
 }
 
@@ -66,7 +69,7 @@ const initial: UiState = {
   usage: null,
   lan: null,
   settings: null,
-  overlay: { visible: false, mode: "compact", game: null, showSeq: 0 },
+  overlay: { visible: false, mode: "compact", game: null, showSeq: 0, zoom: 1, zoomSeq: 0 },
 };
 
 export const isBusy = (s: UiState) => s.messages.some((m) => m.status === "streaming");
@@ -142,12 +145,14 @@ function reduce(s: UiState, msg: ServerMsg): UiState {
     case "overlay.show":
       return {
         ...s,
-        overlay: { visible: true, mode: msg.mode, game: msg.game, showSeq: s.overlay.showSeq + 1 },
+        overlay: { ...s.overlay, visible: true, mode: msg.mode, game: msg.game, showSeq: s.overlay.showSeq + 1 },
       };
     case "lan.status":
       return { ...s, lan: msg.status };
     case "settings":
       return { ...s, settings: msg.settings };
+    case "overlay.zoom":
+      return { ...s, overlay: { ...s.overlay, zoom: msg.zoom, zoomSeq: s.overlay.zoomSeq + 1 } };
     case "overlay.hidden":
       return { ...s, overlay: { ...s.overlay, visible: false } };
   }

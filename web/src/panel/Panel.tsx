@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isBusy, type Connection } from "../api/connection";
 import type { PanelMode } from "../api/generated/PanelMode";
 import type { ResizeEdge } from "../api/generated/ResizeEdge";
+import type { ZoomStep } from "../api/generated/ZoomStep";
 import { findProfile, gameLabel, gamePageUrl } from "../api/games";
 import { useStoredFlag, useUiState } from "../api/hooks";
 import { AgentNotice, ChatHeader } from "../components/ChatHeader";
@@ -35,15 +36,50 @@ export function Panel({ conn }: { conn: Connection }) {
   }, [ui.overlay.showSeq, ui.overlay.mode]);
 
   useEffect(() => {
+    const zoom = (step: ZoomStep) => conn.send({ type: "ui.zoom", step });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         conn.send({ type: "ui.hide" });
+        return;
+      }
+      // Ctrl +/-/0 scale the panel (content and window), as in a browser.
+      if (!e.ctrlKey || e.altKey || e.metaKey) return;
+      const step = zoomKey(e);
+      if (step) {
+        e.preventDefault();
+        if (!e.repeat || step !== "reset") zoom(step);
       }
     };
+    // Ctrl + wheel (and touchpad pinch, which comes as one): one step per notch; small deltas
+    // add up, and steps are spaced so a fast spin doesn't fly through the whole range.
+    let wheel = 0;
+    let lastStep = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      wheel += e.deltaMode === 0 ? e.deltaY : e.deltaY * 40;
+      if (Math.abs(wheel) < 50 || performance.now() - lastStep < 90) return;
+      lastStep = performance.now();
+      zoom(wheel < 0 ? "in" : "out");
+      wheel = 0;
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", onWheel);
+    };
   }, [conn]);
+
+  // A zoom change shows the new value for a moment.
+  const [zoomShown, setZoomShown] = useState(false);
+  useEffect(() => {
+    if (ui.overlay.zoomSeq === 0) return;
+    setZoomShown(true);
+    const t = setTimeout(() => setZoomShown(false), 1200);
+    return () => clearTimeout(t);
+  }, [ui.overlay.zoomSeq]);
 
   const expand = () => {
     conn.send({ type: "ui.setMode", mode: "expanded" }); // the core grows the window upward
@@ -126,6 +162,11 @@ export function Panel({ conn }: { conn: Connection }) {
             onDragStart={mode === "compact" ? startDrag : undefined}
           />
           {ui.status !== "open" && <div className="offline" title="Нет связи с приложением" />}
+          {zoomShown && (
+            <div className="zoom-badge" role="status">
+              {Math.round(ui.overlay.zoom * 100)}%<span> · Ctrl+0 — сброс</span>
+            </div>
+          )}
           <PageTooltip />
         </div>
         {/* Outside .panel: its rounded overflow clip would cut the corner handles. */}
@@ -133,6 +174,14 @@ export function Panel({ conn }: { conn: Connection }) {
       </ShotViewerProvider>
     </OpenLinkContext.Provider>
   );
+}
+
+/** Ctrl + this key zooms the panel ("=" is "+" without Shift; the numpad has its own). */
+function zoomKey(e: KeyboardEvent): ZoomStep | null {
+  if (e.key === "+" || e.key === "=" || e.code === "NumpadAdd") return "in";
+  if (e.key === "-" || e.key === "_" || e.code === "NumpadSubtract") return "out";
+  if (e.key === "0" || e.code === "Numpad0") return "reset";
+  return null;
 }
 
 const ALL_EDGES: ResizeEdge[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];

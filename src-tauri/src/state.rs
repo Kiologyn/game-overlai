@@ -110,6 +110,8 @@ pub struct OverlayState {
     pub visible: bool,
     /// Frame of the game grabbed right before the hotkey showed the panel; dropped on hide.
     pub prefetch: Option<Prefetch>,
+    /// The panel's current zoom (set when it is placed over a game).
+    pub zoom: f64,
 }
 
 #[derive(Debug)]
@@ -121,7 +123,7 @@ pub struct Prefetch {
 
 impl Default for OverlayState {
     fn default() -> Self {
-        Self { game_hwnd: 0, game: None, mode: PanelMode::Compact, visible: false, prefetch: None }
+        Self { game_hwnd: 0, game: None, mode: PanelMode::Compact, visible: false, prefetch: None, zoom: 1.0 }
     }
 }
 
