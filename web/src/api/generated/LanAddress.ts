@@ -7,7 +7,11 @@ export type LanAddress = {
 /**
  * Network adapter, e.g. "Wi-Fi".
  */
-adapter: string, 
+adapter: string, ip: string, 
+/**
+ * A private address of a real adapter; `false` = virtual (WSL, VPN...) or public.
+ */
+recommended: boolean, 
 /**
  * Link with the access token (opens the chat and signs the phone in).
  */

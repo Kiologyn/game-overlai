@@ -263,6 +263,9 @@ pub struct PermissionPrompt {
 pub struct LanAddress {
     /// Network adapter, e.g. "Wi-Fi".
     pub adapter: String,
+    pub ip: String,
+    /// A private address of a real adapter; `false` = virtual (WSL, VPN...) or public.
+    pub recommended: bool,
     /// Link with the access token (opens the chat and signs the phone in).
     pub url: String,
     /// QR code of `url` (SVG markup made by the core).
@@ -280,6 +283,8 @@ pub struct LanStatus {
     pub port: Option<u16>,
     /// Best address first.
     pub addresses: Vec<LanAddress>,
+    /// Adapter the QR code points at (the user's choice); `null` = automatic (the first address).
+    pub chosen_adapter: Option<String>,
     /// Devices connected right now.
     pub clients: u32,
     pub error: Option<String>,
@@ -398,6 +403,9 @@ pub enum ClientMsg {
     /// New access token: devices signed in so far are logged out (this PC's UI only).
     #[serde(rename = "lan.resetToken")]
     LanResetToken,
+    /// Which adapter's address the QR code shows; `null` = automatic (this PC's UI only).
+    #[serde(rename = "lan.chooseAdapter")]
+    LanChooseAdapter { adapter: Option<String> },
     /// Save the settings (this PC's UI only).
     #[serde(rename = "settings.save")]
     SettingsSave { values: SettingsValues },

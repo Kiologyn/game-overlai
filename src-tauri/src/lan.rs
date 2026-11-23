@@ -7,6 +7,9 @@
 //! Resetting the token logs every device out. The token and the on/off choice survive
 //! restarts (`lan.json` next to the history).
 //!
+//! The server listens on every interface; the user picks which one the QR code points at
+//! (automatic = the best guess, see `addresses`), remembered in `lan.json` by adapter name.
+//!
 //! Plain HTTP: fine for a home network, not for a public one (the /phone page says so).
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -28,6 +31,9 @@ pub const COOKIE: &str = "overlai_lan";
 struct Saved {
     enabled: bool,
     token: String,
+    /// Adapter the user picked for the QR code; none = automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    adapter: Option<String>,
 }
 
 pub struct Lan {
@@ -43,6 +49,7 @@ pub struct Lan {
 struct Inner {
     enabled: bool,
     token: String,
+    adapter: Option<String>,
     running: Option<Running>,
     error: Option<String>,
 }
@@ -63,7 +70,7 @@ impl Lan {
         let lan = Self {
             file,
             port,
-            inner: Mutex::new(Inner { enabled: saved.enabled, token, running: None, error: None }),
+            inner: Mutex::new(Inner { enabled: saved.enabled, token, adapter: saved.adapter, running: None, error: None }),
             clients: AtomicUsize::new(0),
             generation: watch::channel(0).0,
         };
@@ -72,7 +79,7 @@ impl Lan {
     }
 
     fn save(&self, inner: &Inner) {
-        let saved = Saved { enabled: inner.enabled, token: inner.token.clone() };
+        let saved = Saved { enabled: inner.enabled, token: inner.token.clone(), adapter: inner.adapter.clone() };
         let result = serde_json::to_string_pretty(&saved)
             .map_err(anyhow::Error::from)
             .and_then(|s| std::fs::write(&self.file, s).map_err(anyhow::Error::from));
@@ -121,9 +128,15 @@ pub fn status(state: &AppState) -> ServerMsg {
     let addresses = match port {
         Some(port) => addresses()
             .into_iter()
-            .map(|(adapter, ip)| {
-                let url = format!("http://{ip}:{port}/?t={}", inner.token);
-                LanAddress { adapter, qr_svg: qr_svg(&url), url }
+            .map(|found| {
+                let url = format!("http://{}:{port}/?t={}", found.ip, inner.token);
+                LanAddress {
+                    adapter: found.adapter,
+                    ip: found.ip.to_string(),
+                    recommended: found.recommended,
+                    qr_svg: qr_svg(&url),
+                    url,
+                }
             })
             .collect(),
         None => vec![],
@@ -133,6 +146,7 @@ pub fn status(state: &AppState) -> ServerMsg {
             enabled: inner.enabled,
             port,
             addresses,
+            chosen_adapter: inner.adapter.clone(),
             clients: lan.clients.load(Ordering::SeqCst) as u32,
             error: inner.error.clone(),
         },
@@ -186,6 +200,22 @@ pub fn set_enabled(state: &Arc<AppState>, on: bool) {
     broadcast(state);
 }
 
+/// The adapter whose address the QR code shows; `None` = automatic.
+pub fn choose_adapter(state: &Arc<AppState>, adapter: Option<String>) {
+    let adapter = adapter.map(|a| a.trim().to_string()).filter(|a| !a.is_empty() && a.len() <= 256);
+    {
+        let lan = &state.lan;
+        let mut inner = lan.inner.lock().unwrap();
+        if inner.adapter == adapter {
+            return;
+        }
+        info!("LAN: QR code address: {}", adapter.as_deref().unwrap_or("automatic"));
+        inner.adapter = adapter;
+        lan.save(&inner);
+    }
+    broadcast(state);
+}
+
 /// A new token: every signed-in device has to scan the QR code again.
 pub fn reset_token(state: &Arc<AppState>) {
     {
@@ -217,10 +247,19 @@ fn start(state: &Arc<AppState>, preferred: u16) -> anyhow::Result<Running> {
     Ok(Running { port, stop })
 }
 
-/// This PC's IPv4 addresses a phone on the same network can reach, best first: the adapter of
-/// the default route, then other private addresses of real adapters (not virtual ones: WSL,
-/// Hyper-V, VirtualBox, VPN/proxy tunnels...).
-pub fn addresses() -> Vec<(String, Ipv4Addr)> {
+/// An IPv4 address of this PC.
+pub struct Found {
+    pub adapter: String,
+    pub ip: Ipv4Addr,
+    /// A private address of a real adapter: where a phone on the home network most likely is.
+    /// The rest (WSL, Hyper-V, VirtualBox, VPN/proxy tunnels, public addresses) are listed too,
+    /// for networks the guess gets wrong.
+    pub recommended: bool,
+}
+
+/// This PC's IPv4 addresses (no loopback or link-local ones), best first: recommended ones,
+/// the adapter of the default route first among them.
+pub fn addresses() -> Vec<Found> {
     let default_route = match local_ip_address::local_ip() {
         Ok(IpAddr::V4(ip)) => Some(ip),
         _ => None,
@@ -229,23 +268,31 @@ pub fn addresses() -> Vec<(String, Ipv4Addr)> {
         warn!("LAN: can't list network adapters: {e}");
         vec![]
     });
-    let mut found: Vec<(String, Ipv4Addr)> = all
+    let mut found: Vec<Found> = all
         .into_iter()
         .filter_map(|(name, ip)| match ip {
-            IpAddr::V4(v4) if v4.is_private() && !is_virtual(&name, v4) => Some((name, v4)),
+            IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_link_local() && !v4.is_unspecified() => {
+                Some(Found { recommended: v4.is_private() && !is_virtual(&name, v4), adapter: name, ip: v4 })
+            }
             _ => None,
         })
         .collect();
-    found.sort_by_key(|(name, ip)| (Some(*ip) != default_route, rank(ip), !name.to_lowercase().contains("wi-fi")));
-    found.dedup_by_key(|(_, ip)| *ip);
+    found.sort_by_key(|f| (!f.recommended, Some(f.ip) != default_route, rank(&f.ip), !is_wireless(&f.adapter)));
+    found.dedup_by_key(|f| f.ip);
     found
+}
+
+fn is_wireless(adapter: &str) -> bool {
+    let a = adapter.to_lowercase();
+    ["wi-fi", "wifi", "wlan", "wireless", "беспровод"].iter().any(|k| a.contains(k))
 }
 
 fn rank(ip: &Ipv4Addr) -> u8 {
     match ip.octets() {
         [192, 168, ..] => 0,
         [10, ..] => 1,
-        _ => 2, // 172.16/12
+        [172, b, ..] if (16..32).contains(&b) => 2,
+        _ => 3, // public
     }
 }
 
@@ -305,6 +352,8 @@ mod tests {
         assert!(!is_virtual("Wi-Fi", home));
         assert!(!is_virtual("Ethernet 2", home));
         assert!(rank(&Ipv4Addr::new(192, 168, 1, 5)) < rank(&Ipv4Addr::new(10, 0, 0, 2)));
+        assert!(rank(&Ipv4Addr::new(172, 20, 0, 1)) < rank(&Ipv4Addr::new(8, 8, 8, 8)));
+        assert!(is_wireless("Беспроводная сеть") && is_wireless("Wi-Fi 2") && !is_wireless("Ethernet"));
     }
 
     #[test]
@@ -317,6 +366,15 @@ mod tests {
         assert!(!lan.token_ok(&token), "no access while the server is off");
         // The token survives a restart.
         assert_eq!(Lan::load(&dir, 1).inner.lock().unwrap().token, token);
+        // So does the chosen adapter; old files without it load as automatic.
+        {
+            let inner = &mut lan.inner.lock().unwrap();
+            inner.adapter = Some("Беспроводная сеть".into());
+            lan.save(inner);
+        }
+        assert_eq!(Lan::load(&dir, 1).inner.lock().unwrap().adapter.as_deref(), Some("Беспроводная сеть"));
+        std::fs::write(dir.join("lan.json"), format!(r#"{{"enabled":false,"token":"{token}"}}"#)).unwrap();
+        assert_eq!(Lan::load(&dir, 1).inner.lock().unwrap().adapter, None);
         assert!(constant_time_eq(b"abc", b"abc") && !constant_time_eq(b"abc", b"abd") && !constant_time_eq(b"a", b"ab"));
         assert!(qr_svg("http://192.168.1.5:47824/?t=x").contains("<svg"));
         let _ = std::fs::remove_dir_all(dir);

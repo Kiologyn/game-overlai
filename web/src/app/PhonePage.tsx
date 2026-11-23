@@ -9,7 +9,6 @@ import { useUiState } from "../api/hooks";
 export function PhonePage({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
   const lan = ui.lan;
-  const [picked, setPicked] = useState(0);
   const [copied, setCopied] = useState(false);
 
   if (!lan) {
@@ -25,7 +24,13 @@ export function PhonePage({ conn }: { conn: Connection }) {
     );
   }
 
-  const address = lan.addresses[Math.min(picked, lan.addresses.length - 1)] ?? null;
+  // The chosen adapter, or the best guess (first) when automatic or the chosen one is gone.
+  const chosen = lan.chosenAdapter;
+  const chosenAddress = chosen === null ? undefined : lan.addresses.find((a) => a.adapter === chosen);
+  const address = chosenAddress ?? lan.addresses[0] ?? null;
+  const recommended = lan.addresses.filter((a) => a.recommended);
+  const others = lan.addresses.filter((a) => !a.recommended);
+  const choose = (adapter: string | null) => conn.send({ type: "lan.chooseAdapter", adapter });
   const running = lan.enabled && lan.port !== null;
 
   const copy = async () => {
@@ -79,17 +84,42 @@ export function PhonePage({ conn }: { conn: Connection }) {
                 <Copy size={13} aria-hidden /> {copied ? "Скопировано" : "Ссылка со входом"}
               </button>
             </div>
-            {lan.addresses.length > 1 && (
-              <label className="phone-adapter">
-                Сеть:{" "}
-                <select value={picked} onChange={(e) => setPicked(Number(e.target.value))}>
-                  {lan.addresses.map((a, i) => (
-                    <option key={a.url} value={i}>
-                      {a.adapter} — {new URL(a.url).hostname}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <label className="phone-adapter">
+              <span>Сетевой интерфейс</span>
+              <select value={chosenAddress ? chosenAddress.adapter : ""} onChange={(e) => choose(e.target.value || null)}>
+                <option value="">
+                  Автоматически ({lan.addresses[0].adapter}, {lan.addresses[0].ip})
+                </option>
+                {recommended.length > 0 && (
+                  <optgroup label="Локальная сеть">
+                    {recommended.map((a) => (
+                      <option key={a.adapter + a.ip} value={a.adapter}>
+                        {a.adapter} — {a.ip}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {others.length > 0 && (
+                  <optgroup label="Виртуальные, VPN и другие">
+                    {others.map((a) => (
+                      <option key={a.adapter + a.ip} value={a.adapter}>
+                        {a.adapter} — {a.ip}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+            {chosen !== null && !chosenAddress && (
+              <p className="phone-warn">
+                Выбранного интерфейса «{chosen}» сейчас нет (отключён или без адреса), код ведёт на автоматический.
+              </p>
+            )}
+            {!address.recommended && (
+              <p className="phone-warn">
+                Это виртуальный, VPN или внешний адрес: телефон из домашней сети Wi-Fi, скорее всего, по нему не
+                откроет чат.
+              </p>
             )}
             <p className="phone-clients">
               {lan.clients === 0 ? "Устройств не подключено" : `Подключено устройств: ${lan.clients}`}

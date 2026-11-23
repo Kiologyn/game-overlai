@@ -1501,18 +1501,27 @@ html[data-surface="overlay"] .shot-viewer {
 }
 
 .phone-adapter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
   color: var(--muted);
   font-size: 13px;
 }
 
 .phone-adapter select {
-  margin-left: 4px;
+  max-width: 100%;
   padding: 4px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
+}
+
+.phone-card-text .phone-warn {
+  color: var(--warn);
+  font-size: 13px;
 }
 
 .phone-clients {

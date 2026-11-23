@@ -38,7 +38,9 @@ off by default) and opens http://127.0.0.1:47823/phone with the QR code. The QR 
 token once and leaves a cookie (SameSite=Lax: QR scanners open the link from their own site); without
 it the LAN server answers 401. It serves the browser chat only
 (no MCP, no overlay or access controls); "Сбросить доступ" signs every device out. A question from the
-phone takes the window in the foreground on the PC as the game (and 📷 captures it).
+phone takes the window in the foreground on the PC as the game (and 📷 captures it). The server listens on
+every interface; "Сетевой интерфейс" on /phone picks the address in the QR code (automatic = a private
+address of a real adapter, the default route first; virtual/VPN ones are listed separately), kept in `lan.json`.
 
 ## Layout
 

@@ -143,6 +143,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         // This PC's UI only: devices on the network can't change access or open things on the PC.
         ClientMsg::LanSet { .. }
         | ClientMsg::LanResetToken
+        | ClientMsg::LanChooseAdapter { .. }
         | ClientMsg::UiOpenUrl { .. }
         | ClientMsg::SettingsSave { .. }
         | ClientMsg::SettingsAutostart { .. }
@@ -155,6 +156,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         }
         ClientMsg::LanSet { enabled } => lan::set_enabled(&ctx.state, enabled),
         ClientMsg::LanResetToken => lan::reset_token(&ctx.state),
+        ClientMsg::LanChooseAdapter { adapter } => lan::choose_adapter(&ctx.state, adapter),
         ClientMsg::SettingsSave { values } => settings::save(&ctx.state, values),
         ClientMsg::SettingsAutostart { enabled } => settings::set_autostart(&ctx.state, enabled),
         ClientMsg::SettingsCapturing { active } => {

@@ -18,6 +18,10 @@ port: number | null,
  */
 addresses: Array<LanAddress>, 
 /**
+ * Adapter the QR code points at (the user's choice); `null` = automatic (the first address).
+ */
+chosenAdapter: string | null, 
+/**
  * Devices connected right now.
  */
 clients: number, error: string | null, };
