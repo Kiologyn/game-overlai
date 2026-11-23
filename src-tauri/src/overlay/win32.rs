@@ -13,7 +13,12 @@ use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentThreadId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
 };
+use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EVENT_SYSTEM_FOREGROUND, GA_ROOTOWNER, GetAncestor, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, SetWindowDisplayAffinity,
@@ -59,6 +64,50 @@ pub fn is_shell_window(h: HWND) -> bool {
         class_name(h).as_str(),
         "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Progman" | "WorkerW" | "NotifyIconOverflowWindow"
     )
+}
+
+pub fn process_id(h: HWND) -> u32 {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+    pid
+}
+
+/// A window of this app (the panel, its owner, menus) or one owned by it (WebView2 popups run
+/// in the browser process but are owned by the panel).
+pub fn is_own(h: HWND) -> bool {
+    let me = unsafe { GetCurrentProcessId() };
+    let root = unsafe { GetAncestor(h, GA_ROOTOWNER) };
+    process_id(h) == me || (!root.is_invalid() && process_id(root) == me)
+}
+
+static ON_FOREGROUND: std::sync::OnceLock<Box<dyn Fn(HWND) + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Calls `f` with the new foreground window whenever it changes. Must run on a thread that
+/// pumps messages (the main one); `f` runs there too.
+pub fn watch_foreground(f: impl Fn(HWND) + Send + Sync + 'static) -> bool {
+    if ON_FOREGROUND.set(Box::new(f)).is_err() {
+        return false;
+    }
+    let hook = unsafe {
+        SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            None,
+            Some(foreground_changed),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT,
+        )
+    };
+    !hook.is_invalid()
+}
+
+unsafe extern "system" fn foreground_changed(_: HWINEVENTHOOK, _: u32, h: HWND, object: i32, _: i32, _: u32, _: u32) {
+    if object == OBJID_WINDOW.0
+        && let Some(f) = ON_FOREGROUND.get()
+    {
+        f(h);
+    }
 }
 
 /// "cs2.exe" for the process that owns the window.

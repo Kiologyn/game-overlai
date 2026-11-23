@@ -20,7 +20,7 @@ By hand: `cd web; npm install; npm run build`, then `cd src-tauri; cargo run`. O
 installs the pinned ACP adapter of the agent into `%LOCALAPPDATA%\game-overlai\agents\`.
 
 Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel (the game's latest chat),
-`Esc` / ✕ — hide. The panel moves by its header (grip in the compact field) and resizes by its
+`Esc` / ✕ — hide; it also hides when focus goes to another app (clicking into the game keeps it). The panel moves by its header (grip in the compact field) and resizes by its
 edges, always inside the game window; its place is remembered per game. Ctrl + wheel / Ctrl +/− over the
 panel zoom it (content and window together, 50–200%, per game), Ctrl+0 — back to the default zoom. The agent looks at the game itself (`screenshot_game`) when a question
 needs the screen; its first frame after the hotkey is the one grabbed as the panel opened. The tray icon has the rest;
