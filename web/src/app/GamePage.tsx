@@ -15,27 +15,22 @@ interface Props {
   onBack(): void;
 }
 
-type ShotChoice = "panel" | "on" | "off";
-
 interface Form {
   name: string;
   instructions: string;
   sources: string;
-  screenshot: ShotChoice;
 }
 
 const toForm = (p: GameProfile): Form => ({
   name: p.name ?? "",
   instructions: p.instructions,
   sources: p.sources,
-  screenshot: p.screenshot === null ? "panel" : p.screenshot ? "on" : "off",
 });
 
 const sameForm = (a: Form, b: Form) =>
   a.name.trim() === b.name.trim() &&
   a.instructions.trim() === b.instructions.trim() &&
-  a.sources.trim() === b.sources.trim() &&
-  a.screenshot === b.screenshot;
+  a.sources.trim() === b.sources.trim();
 
 const DATE = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
@@ -62,7 +57,6 @@ export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack }:
       name: form.name.trim() || null,
       instructions: form.instructions.trim(),
       sources: form.sources.trim(),
-      screenshot: form.screenshot === "panel" ? null : form.screenshot === "on",
     });
   };
 
@@ -123,15 +117,6 @@ export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack }:
             placeholder={"Сайты, по одному в строке:\nfextralife.com\nwiki.example.org"}
           />
           <span className="field-hint">Агент сначала ищет на этих сайтах, остальные — если там нет ответа.</span>
-        </label>
-
-        <label className="field">
-          <span className="field-label">Кадр игры (📷) при открытии панели</span>
-          <select value={form.screenshot} onChange={(e) => set("screenshot", e.target.value as ShotChoice)}>
-            <option value="panel">как было в панели</option>
-            <option value="on">прикладывать</option>
-            <option value="off">не прикладывать</option>
-          </select>
         </label>
 
         <div className="game-form-actions">

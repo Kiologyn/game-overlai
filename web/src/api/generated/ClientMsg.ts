@@ -7,8 +7,8 @@ import type { ZoomStep } from "./ZoomStep";
 /**
  * UI -> core.
  */
-export type ClientMsg = { "type": "ui.hide" } | { "type": "ui.setMode", mode: PanelMode, } | { "type": "ui.dragStart" } | { "type": "ui.resizeStart", edge: ResizeEdge, } | { "type": "ui.zoom", step: ZoomStep, } | { "type": "chat.send", text: string, screenshot: boolean, 
+export type ClientMsg = { "type": "ui.hide" } | { "type": "ui.setMode", mode: PanelMode, } | { "type": "ui.dragStart" } | { "type": "ui.resizeStart", edge: ResizeEdge, } | { "type": "ui.zoom", step: ZoomStep, } | { "type": "chat.send", text: string, 
 /**
  * Start a new chat with this message (sent from the quick field).
  */
-newChat: boolean, } | { "type": "chat.cancel" } | { "type": "chat.new" } | { "type": "chat.open", id: string, } | { "type": "chat.delete", id: string, } | { "type": "game.update", exe: string, name: string | null, instructions: string, sources: string, screenshot: boolean | null, } | { "type": "permission.respond", id: string, optionId: string | null, } | { "type": "lan.set", enabled: boolean, } | { "type": "lan.resetToken" } | { "type": "lan.chooseAdapter", adapter: string | null, } | { "type": "settings.save", values: SettingsValues, } | { "type": "settings.autostart", enabled: boolean, } | { "type": "settings.capturing", active: boolean, } | { "type": "settings.resetPanelPlaces" } | { "type": "app.restart" } | { "type": "ui.openUrl", url: string, };
+newChat: boolean, } | { "type": "chat.cancel" } | { "type": "chat.new" } | { "type": "chat.open", id: string, } | { "type": "chat.delete", id: string, } | { "type": "game.update", exe: string, name: string | null, instructions: string, sources: string, } | { "type": "permission.respond", id: string, optionId: string | null, } | { "type": "lan.set", enabled: boolean, } | { "type": "lan.resetToken" } | { "type": "lan.chooseAdapter", adapter: string | null, } | { "type": "settings.save", values: SettingsValues, } | { "type": "settings.autostart", enabled: boolean, } | { "type": "settings.capturing", active: boolean, } | { "type": "settings.resetPanelPlaces" } | { "type": "app.restart" } | { "type": "ui.openUrl", url: string, };

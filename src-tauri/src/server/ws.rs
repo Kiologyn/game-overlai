@@ -133,18 +133,18 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         | ClientMsg::UiResizeStart { .. }
         | ClientMsg::UiZoom { .. } => {}
         // From a phone the game is whatever runs on the PC now (the overlay may never have opened).
-        ClientMsg::ChatSend { text, screenshot, new_chat } => {
+        ClientMsg::ChatSend { text, new_chat } => {
             if ctx.lan {
                 overlay::adopt_foreground_game(&ctx.state);
             }
-            chat::send(&ctx.state, &text, screenshot, new_chat, kind == ClientKind::Overlay)
+            chat::send(&ctx.state, &text, new_chat, kind == ClientKind::Overlay)
         }
         ClientMsg::ChatCancel => chat::cancel(&ctx.state),
         ClientMsg::ChatNew => chat::new_chat(&ctx.state),
         ClientMsg::ChatOpen { id } => chat::open(&ctx.state, &id),
         ClientMsg::ChatDelete { id } => chat::delete(&ctx.state, &id),
-        ClientMsg::GameUpdate { exe, name, instructions, sources, screenshot } => {
-            games::update(&ctx.state, &exe, ProfileEdit { name, instructions, sources, screenshot })
+        ClientMsg::GameUpdate { exe, name, instructions, sources } => {
+            games::update(&ctx.state, &exe, ProfileEdit { name, instructions, sources })
         }
         ClientMsg::PermissionRespond { id, option_id } => chat::respond_permission(&ctx.state, &id, option_id),
         // This PC's UI only: devices on the network can't change access or open things on the PC.

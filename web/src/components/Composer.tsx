@@ -1,5 +1,5 @@
 import type { KeyboardEvent, RefObject } from "react";
-import { ArrowUp, Camera, CameraOff, Gamepad2, GripVertical, Square, X } from "lucide-react";
+import { ArrowUp, Gamepad2, GripVertical, Square, X } from "lucide-react";
 import type { GameInfo } from "../api/generated/GameInfo";
 
 interface Props {
@@ -11,8 +11,6 @@ interface Props {
   onStop(): void;
   /** Overlay only: hide the panel. */
   onClose?: () => void;
-  screenshot: boolean;
-  onScreenshotChange(on: boolean): void;
   game: GameInfo | null;
   /** Shown name of the game (the profile's name if the user gave one). */
   gameName?: string;
@@ -26,7 +24,7 @@ interface Props {
 }
 
 export function Composer(props: Props) {
-  const { value, onChange, onSubmit, busy, onStop, onClose, screenshot, onScreenshotChange, game, agentName } = props;
+  const { value, onChange, onSubmit, busy, onStop, onClose, game, agentName } = props;
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.nativeEvent.isComposing) {
@@ -69,16 +67,6 @@ export function Composer(props: Props) {
           </span>
         );
       })()}
-      <button
-        type="button"
-        className={`icon-btn toggle ${screenshot ? "on" : ""}`}
-        onClick={() => onScreenshotChange(!screenshot)}
-        title={screenshot ? "Кадр игры прикладывается к вопросу — выключить" : "Без кадра игры — включить"}
-        aria-label="Прикладывать кадр игры"
-        aria-pressed={screenshot}
-      >
-        {screenshot ? <Camera size={16} /> : <CameraOff size={16} />}
-      </button>
       <input
         ref={props.inputRef}
         className="input"

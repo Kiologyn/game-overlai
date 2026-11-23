@@ -30,9 +30,10 @@ struct Overlai {
 impl Overlai {
     #[tool(
         name = "screenshot_game",
-        description = "Capture the current frame of the game the user is playing (the game window, full resolution). \
-            Use it when you need to see the screen: the user refers to something on screen and no frame is attached, \
-            or you need to check the current game state. Returns one image.",
+        description = "Capture a frame of the game the user is playing (the game window). Call it whenever the answer \
+            may depend on what is on screen: the user refers to something on screen, asks about their current situation, \
+            or you need to check the game state. The first call after the user opens the overlay returns the frame from \
+            that moment; later calls take a fresh one. Returns one image.",
         meta = always_load_meta()
     )]
     async fn screenshot_game(&self) -> Result<CallToolResult, ErrorData> {
@@ -64,9 +65,14 @@ impl Overlai {
         if source == crate::capture::Source::Monitor {
             note.push_str(", whole monitor (the window itself could not be captured)");
         }
-        match &taken.fallback {
-            None => note.push_str(", captured just now."),
-            Some((reason, age)) => note.push_str(&format!(
+        match &taken.when {
+            shots::Taken::Now => note.push_str(", captured just now."),
+            shots::Taken::AtHotkey { age } => note.push_str(&format!(
+                ", captured {} s ago at the moment the user opened the overlay (what they are asking about). \
+                 Call the tool again for a fresh frame.",
+                age.as_secs()
+            )),
+            shots::Taken::Fallback { reason, age } => note.push_str(&format!(
                 ", captured {} s ago when the user opened the overlay; a fresh frame is not available now ({reason}).",
                 age.as_secs()
             )),

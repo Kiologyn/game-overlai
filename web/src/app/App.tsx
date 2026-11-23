@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Menu, MessageSquare, Plus, Search, Settings2, Trash2 } from "lucide-react";
 import { isBusy, type Connection } from "../api/connection";
 import { blankProfile, findProfile, gameLabel, sameExe } from "../api/games";
-import { useStoredFlag, useUiState } from "../api/hooks";
+import { useUiState } from "../api/hooks";
 import { AgentDot, AgentNotice, UsageBadge } from "../components/ChatHeader";
 import { Composer } from "../components/Composer";
 import { MessageList } from "../components/MessageList";
@@ -21,8 +21,6 @@ export function App({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
-  const [storedShot, setStoredShot] = useStoredFlag("overlai.screenshot", true);
-  const [shotOverride, setShotOverride] = useState<boolean | null>(null);
   /** Exe of the game whose page is open; null = the chat. */
   const [gameExe, setGameExe] = useState<string | null>(gameInUrl);
   /** Narrow screens (phone): the chat list slides in over the chat. */
@@ -43,16 +41,10 @@ export function App({ conn }: { conn: Connection }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // 📷 as in the panel: the game's profile may set it, a toggle overrides it for this chat.
-  useEffect(() => setShotOverride(null), [ui.chatId]);
-  const profileShot = findProfile(ui.games, ui.chatGame?.exe)?.screenshot ?? null;
-  const screenshot = shotOverride ?? profileShot ?? storedShot;
-  const setScreenshot = (on: boolean) => (profileShot === null ? setStoredShot(on) : setShotOverride(on));
-
   const submit = () => {
     const text = draft.trim();
     if (!text || busy) return;
-    conn.send({ type: "chat.send", text, screenshot, newChat: false });
+    conn.send({ type: "chat.send", text, newChat: false });
     setDraft("");
   };
 
@@ -170,7 +162,6 @@ export function App({ conn }: { conn: Connection }) {
                     name: p.name,
                     instructions: p.instructions,
                     sources: p.sources,
-                    screenshot: p.screenshot,
                   })
                 }
                 onOpenChat={openChat}
@@ -193,8 +184,6 @@ export function App({ conn }: { conn: Connection }) {
                   onSubmit={submit}
                   busy={busy}
                   onStop={() => conn.send({ type: "chat.cancel" })}
-                  screenshot={screenshot}
-                  onScreenshotChange={setScreenshot}
                   game={ui.chatGame}
                   gameName={gameLabel(ui.chatGame, ui.games)}
                   onOpenGame={ui.chatGame?.exe ? () => showGame(ui.chatGame?.exe ?? null) : undefined}

@@ -22,7 +22,8 @@ installs the pinned ACP adapter of the agent into `%LOCALAPPDATA%\game-overlai\a
 Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel (the game's latest chat),
 `Esc` / ✕ — hide. The panel moves by its header (grip in the compact field) and resizes by its
 edges, always inside the game window; its place is remembered per game. Ctrl + wheel / Ctrl +/− over the
-panel zoom it (content and window together, 50–200%, per game), Ctrl+0 — back to the default zoom. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
+panel zoom it (content and window together, 50–200%, per game), Ctrl+0 — back to the default zoom. The agent looks at the game itself (`screenshot_game`) when a question
+needs the screen; its first frame after the hotkey is the one grabbed as the panel opened. The tray icon has the rest;
 the chat in a browser is at http://127.0.0.1:47823/.
 
 Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys, agent (Claude Code or Codex),
@@ -31,7 +32,7 @@ Hotkeys and most values apply at once; the agent, proxy and ports after the rest
 
 Game profiles: a game's name in the browser's chat list (or the game chip in the overlay) opens its page —
 its name for the agent, standing instructions (spoilers, character, language...), sites to search first,
-the 📷 default, and its chats. The agent gets the profile in the system prompt of a new session; a resumed
+and its chats. The agent gets the profile in the system prompt of a new session; a resumed
 session keeps its first system prompt (Claude Code), so a changed profile is sent with the next question.
 
 Phone: tray → "Доступ с телефона (Wi-Fi)" turns on a second server for the local network (port 47824,
@@ -39,7 +40,7 @@ off by default) and opens http://127.0.0.1:47823/phone with the QR code. The QR 
 token once and leaves a cookie (SameSite=Lax: QR scanners open the link from their own site); without
 it the LAN server answers 401. It serves the browser chat only
 (no MCP, no overlay or access controls); "Сбросить доступ" signs every device out. A question from the
-phone takes the window in the foreground on the PC as the game (and 📷 captures it). The server listens on
+phone takes the window in the foreground on the PC as the game (its frames come from it). The server listens on
 every interface; "Сетевой интерфейс" on /phone picks the address in the QR code (automatic = a private
 address of a real adapter, the default route first; virtual/VPN ones are listed separately), kept in `lan.json`.
 
@@ -51,7 +52,7 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
 | `src-tauri/src/overlay/` | the panel window: placement over the game, focus, capture exclusion (Win32) |
 | `src-tauri/src/agent/` | agents over ACP: adapter install, supervision, sessions, permissions; `spec.rs` = per-agent settings |
 | `src-tauri/src/chat.rs`, `history.rs` | current chat ↔ agent session, system prompt; chat history in SQLite, frames on disk |
-| `src-tauri/src/games.rs` | game profiles (per exe): name, instructions, sources, 📷 default |
+| `src-tauri/src/games.rs` | game profiles (per exe): name, instructions, sources |
 | `src-tauri/src/capture/`, `shots.rs` | game frames: Windows Graphics Capture, JPEG encoding, storage |
 | `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): `screenshot_game` |
 | `src-tauri/src/server/` | HTTP + WebSocket servers the UI talks to: local (127.0.0.1) and LAN (token) |
@@ -87,5 +88,5 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
 - Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).
 
 Debug switches: `OVERLAI_UI_DEV=http://localhost:5173` (UI from Vite), `OVERLAI_DEBUG_SHOW=compact|expanded`
-(open the panel on start), `OVERLAI_DEBUG_CAPTURABLE=1` (panel visible in screenshots),
+(open the panel on start), `OVERLAI_DEBUG_CAPTURABLE=1` (panel visible in screenshots, like the setting),
 `OVERLAI_LAN_ADDR=127.0.0.1` (phone server on this PC only: tests without the firewall prompt).

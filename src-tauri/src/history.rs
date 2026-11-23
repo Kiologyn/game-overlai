@@ -73,7 +73,7 @@ const SCHEMA_V3: &str = "
 ALTER TABLE games ADD COLUMN name TEXT;                          -- the user's name for the game
 ALTER TABLE games ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
 ALTER TABLE games ADD COLUMN sources TEXT NOT NULL DEFAULT '';   -- sites to search first, one per line
-ALTER TABLE games ADD COLUMN screenshot INTEGER;                 -- 📷 default; NULL = as the panel has it
+ALTER TABLE games ADD COLUMN screenshot INTEGER;                 -- unused: was the 📷 default (the button is gone)
 ";
 
 /// Which version of its game's profile a chat's agent session was told (`chat::profile_key`).
@@ -352,7 +352,6 @@ pub struct ProfileEdit {
     pub name: Option<String>,
     pub instructions: String,
     pub sources: String,
-    pub screenshot: Option<bool>,
 }
 
 impl History {
@@ -379,11 +378,11 @@ impl History {
         let name = edit.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         self.write("update game", |db| {
             db.execute(
-                "INSERT INTO games (exe, title, last_seen, name, instructions, sources, screenshot)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO games (exe, title, last_seen, name, instructions, sources)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (exe) DO UPDATE SET name = excluded.name, instructions = excluded.instructions,
-                     sources = excluded.sources, screenshot = excluded.screenshot",
-                params![exe, title, now_ms(), name, edit.instructions.trim(), edit.sources.trim(), edit.screenshot],
+                     sources = excluded.sources",
+                params![exe, title, now_ms(), name, edit.instructions.trim(), edit.sources.trim()],
             )
             .map(drop)
         });
@@ -428,7 +427,7 @@ impl History {
     }
 }
 
-const GAME: &str = "SELECT exe, title, name, instructions, sources, screenshot FROM games";
+const GAME: &str = "SELECT exe, title, name, instructions, sources FROM games";
 
 fn game_row(r: &rusqlite::Row) -> rusqlite::Result<GameProfile> {
     Ok(GameProfile {
@@ -437,7 +436,6 @@ fn game_row(r: &rusqlite::Row) -> rusqlite::Result<GameProfile> {
         name: r.get(2)?,
         instructions: r.get(3)?,
         sources: r.get(4)?,
-        screenshot: r.get(5)?,
     })
 }
 
@@ -590,20 +588,18 @@ mod tests {
         let cs2 = GameInfo { title: "Counter-Strike 2".into(), exe: "cs2.exe".into() };
         h.create_chat("a", Some(&cs2), "claude", "вопрос", 1000);
         let p = h.game("CS2.exe").unwrap();
-        assert_eq!((p.name, p.instructions.as_str(), p.screenshot), (None, "", None));
+        assert_eq!((p.name, p.instructions.as_str()), (None, ""));
 
         let edit = ProfileEdit {
             name: Some("  CS2 ".into()),
             instructions: " без спойлеров 
 ".into(),
             sources: "liquipedia.net".into(),
-            screenshot: Some(false),
         };
         let p = h.update_game("cs2.exe", "ignored for a known game", &edit).unwrap();
         assert_eq!(p.name.as_deref(), Some("CS2"));
         assert_eq!(p.instructions, "без спойлеров");
         assert_eq!(p.title, "Counter-Strike 2");
-        assert_eq!(p.screenshot, Some(false));
         // A new chat refreshes the window title but keeps the profile.
         h.create_chat("b", Some(&GameInfo { title: "CS2 beta".into(), ..cs2 }), "claude", "ещё", 2000);
         let p = h.game("cs2.exe").unwrap();

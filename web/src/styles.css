@@ -292,10 +292,6 @@ button {
   opacity: 0.4;
 }
 
-.icon-btn.toggle.on {
-  color: var(--text);
-}
-
 .icon-btn.send {
   border-radius: 50%;
   background: var(--primary);

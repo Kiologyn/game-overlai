@@ -43,7 +43,6 @@ pub enum Update {
 #[derive(Clone)]
 pub enum PromptBlock {
     Text(String),
-    Image { base64: String, mime: String },
 }
 
 /// Our MCP server (game screenshots), offered to every session the agent opens.

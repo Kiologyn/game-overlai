@@ -117,7 +117,7 @@ pub struct OverlayState {
 #[derive(Debug)]
 pub struct Prefetch {
     pub frame: Arc<Frame>,
-    /// Already attached to a message (only the first message after the hotkey gets it).
+    /// Already given to the agent (only its first screenshot after the hotkey gets it).
     pub used: bool,
 }
 

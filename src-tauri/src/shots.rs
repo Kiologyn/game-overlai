@@ -1,5 +1,5 @@
-//! Game frames for the agent: attached to the user's message (📷 in the input field) or taken
-//! by the agent itself through the MCP tool. Encoded images are kept with their chat in the
+//! Game frames for the agent: it takes them itself through the MCP tool (`screenshot_game`)
+//! when a question needs the screen. Encoded images are kept with their chat in the
 //! history (`shots\<chat>\<shot>.jpg`) and served to the UI at `/api/shots/{id}`.
 
 use std::sync::Arc;
@@ -11,44 +11,46 @@ use crate::capture::{self, Frame};
 use crate::protocol::Shot;
 use crate::state::AppState;
 
-/// Frame for a message the user sends with 📷: the one grabbed when the hotkey opened the
-/// overlay (the moment the user asks about; some games also pause or hide tooltips once they
-/// lose focus) if this is the first message since, otherwise a fresh one.
-pub async fn for_message(state: &AppState) -> Result<Arc<Frame>, String> {
-    let (hwnd, prefetched) = {
-        let mut ov = state.overlay.lock().unwrap();
-        let prefetched = ov.prefetch.as_mut().filter(|p| !p.used).map(|p| {
-            p.used = true;
-            p.frame.clone()
-        });
-        (ov.game_hwnd, prefetched)
-    };
-    match prefetched {
-        Some(frame) => Ok(frame),
-        None => grab_game(state, hwnd).await.map(Arc::new),
-    }
-}
+/// The frame grabbed when the hotkey opened the overlay is given out as the first one only
+/// this soon after; later the screen has likely moved on.
+const HOTKEY_FRAME_FOR: Duration = Duration::from_secs(120);
 
 pub struct AgentFrame {
     pub frame: Arc<Frame>,
-    /// Set when the game can't be captured now and the frame from when the overlay opened
-    /// is used instead: why, and how old that frame is.
-    pub fallback: Option<(String, Duration)>,
+    pub when: Taken,
 }
 
-/// Frame for the agent's tool: a fresh one; if the game can't be captured right now (e.g. a
-/// fullscreen game minimised itself when the overlay took focus), the one from the hotkey.
+pub enum Taken {
+    Now,
+    /// The frame grabbed when the hotkey opened the overlay: the moment the user asks about.
+    AtHotkey { age: Duration },
+    /// The game can't be captured now; the hotkey's frame instead: why, and its age.
+    Fallback { reason: String, age: Duration },
+}
+
+/// Frame for the agent's tool. The first one after the hotkey opened the overlay is the frame
+/// grabbed at that moment, before the panel took focus (what the user asks about; some games
+/// also pause or hide tooltips once unfocused); later ones are fresh. If the game can't be
+/// captured now (e.g. a fullscreen game minimised itself), the hotkey's frame again.
 pub async fn for_agent(state: &AppState) -> Result<AgentFrame, String> {
-    let (hwnd, prefetched) = {
-        let ov = state.overlay.lock().unwrap();
-        (ov.game_hwnd, ov.prefetch.as_ref().map(|p| p.frame.clone()))
+    let (hwnd, first, prefetched) = {
+        let mut ov = state.overlay.lock().unwrap();
+        let first = ov.prefetch.as_mut().filter(|p| !p.used && p.frame.taken.elapsed() < HOTKEY_FRAME_FOR).map(|p| {
+            p.used = true;
+            p.frame.clone()
+        });
+        (ov.game_hwnd, first, ov.prefetch.as_ref().map(|p| p.frame.clone()))
     };
+    if let Some(frame) = first {
+        let age = frame.taken.elapsed();
+        return Ok(AgentFrame { frame, when: Taken::AtHotkey { age } });
+    }
     match grab_game(state, hwnd).await {
-        Ok(frame) => Ok(AgentFrame { frame: Arc::new(frame), fallback: None }),
+        Ok(frame) => Ok(AgentFrame { frame: Arc::new(frame), when: Taken::Now }),
         Err(reason) => match prefetched {
             Some(frame) => {
                 let age = frame.taken.elapsed();
-                Ok(AgentFrame { frame, fallback: Some((reason, age)) })
+                Ok(AgentFrame { frame, when: Taken::Fallback { reason, age } })
             }
             None => Err(reason),
         },

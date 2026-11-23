@@ -18,7 +18,7 @@ export function gameLabel(game: GameInfo | null, games: GameProfile[]): string {
 
 /** A profile for a game the core doesn't know yet (saving it creates the row). */
 export function blankProfile(exe: string, title = ""): GameProfile {
-  return { exe, title, name: null, instructions: "", sources: "", screenshot: null };
+  return { exe, title, name: null, instructions: "", sources: "" };
 }
 
 /** URL of a game's page in the browser chat. */

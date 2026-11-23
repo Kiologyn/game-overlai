@@ -19,8 +19,4 @@ instructions: string,
 /**
  * Sites the agent should search first, one per line.
  */
-sources: string, 
-/**
- * 📷 when the panel opens over this game; `null` = as the panel had it.
- */
-screenshot: boolean | null, };
+sources: string, };

@@ -48,11 +48,10 @@ pub fn update(state: &AppState, exe: &str, mut edit: ProfileEdit) {
         .unwrap_or_default();
     if let Some(game) = state.history.update_game(exe, &title, &edit) {
         info!(
-            "game profile {exe}: name={:?}, {} chars of instructions, {} sources, 📷 {:?}",
+            "game profile {exe}: name={:?}, {} chars of instructions, {} sources",
             game.name,
             game.instructions.chars().count(),
             game.sources.lines().filter(|l| !l.trim().is_empty()).count(),
-            game.screenshot
         );
         state.hub.send(Target::All, ServerMsg::GamesUpsert { game });
     }

@@ -6,8 +6,8 @@ import { isBusy, type Connection } from "../api/connection";
 import type { PanelMode } from "../api/generated/PanelMode";
 import type { ResizeEdge } from "../api/generated/ResizeEdge";
 import type { ZoomStep } from "../api/generated/ZoomStep";
-import { findProfile, gameLabel, gamePageUrl } from "../api/games";
-import { useStoredFlag, useUiState } from "../api/hooks";
+import { gameLabel, gamePageUrl } from "../api/games";
+import { useUiState } from "../api/hooks";
 import { AgentNotice, ChatHeader } from "../components/ChatHeader";
 import { Composer } from "../components/Composer";
 import { OpenLinkContext } from "../components/Markdown";
@@ -19,9 +19,6 @@ export function Panel({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
   const [mode, setMode] = useState<PanelMode>("compact");
   const [draft, setDraft] = useState("");
-  const [storedShot, setStoredShot] = useStoredFlag("overlai.screenshot", true);
-  /** 📷 toggled while the panel is open over a game whose profile sets a default. */
-  const [shotOverride, setShotOverride] = useState<boolean | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = isBusy(ui);
 
@@ -29,7 +26,6 @@ export function Panel({ conn }: { conn: Connection }) {
   useEffect(() => {
     if (ui.overlay.showSeq === 0) return;
     setMode(ui.overlay.mode);
-    setShotOverride(null); // each opening starts from the game's default
     const focus = () => inputRef.current?.focus();
     focus();
     requestAnimationFrame(focus);
@@ -95,7 +91,7 @@ export function Panel({ conn }: { conn: Connection }) {
     if (!text || busy) return;
     const fromQuickField = mode === "compact";
     if (fromQuickField) expand();
-    conn.send({ type: "chat.send", text, screenshot, newChat: fromQuickField });
+    conn.send({ type: "chat.send", text, newChat: fromQuickField });
     setDraft("");
   };
 
@@ -105,10 +101,6 @@ export function Panel({ conn }: { conn: Connection }) {
   const startResize = useCallback((edge: ResizeEdge) => conn.send({ type: "ui.resizeStart", edge }), [conn]);
 
   const game = mode === "expanded" ? (ui.chatGame ?? ui.overlay.game) : ui.overlay.game;
-  // The game's profile may set 📷 for it; otherwise the panel keeps the last choice.
-  const profileShot = findProfile(ui.games, ui.overlay.game?.exe)?.screenshot ?? null;
-  const screenshot = shotOverride ?? profileShot ?? storedShot;
-  const setScreenshot = (on: boolean) => (profileShot === null ? setStoredShot(on) : setShotOverride(on));
   const openGame = game?.exe ? () => conn.send({ type: "ui.openUrl", url: gamePageUrl(game.exe) }) : undefined;
   const agentDown = ui.agent?.state === "error";
 
@@ -149,8 +141,6 @@ export function Panel({ conn }: { conn: Connection }) {
             busy={busy}
             onStop={() => conn.send({ type: "chat.cancel" })}
             onClose={() => conn.send({ type: "ui.hide" })}
-            screenshot={screenshot}
-            onScreenshotChange={setScreenshot}
             game={game}
             gameName={gameLabel(game, ui.games)}
             onOpenGame={openGame}

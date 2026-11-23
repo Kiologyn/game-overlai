@@ -73,8 +73,6 @@ pub struct GameProfile {
     pub instructions: String,
     /// Sites the agent should search first, one per line.
     pub sources: String,
-    /// 📷 when the panel opens over this game; `null` = as the panel had it.
-    pub screenshot: Option<bool>,
 }
 
 // ------------------------------------------------------------------ chat
@@ -386,7 +384,6 @@ pub enum ClientMsg {
     #[serde(rename = "chat.send", rename_all = "camelCase")]
     ChatSend {
         text: String,
-        screenshot: bool,
         /// Start a new chat with this message (sent from the quick field).
         new_chat: bool,
     },
@@ -409,7 +406,6 @@ pub enum ClientMsg {
         name: Option<String>,
         instructions: String,
         sources: String,
-        screenshot: Option<bool>,
     },
     /// `optionId: null` = dismiss (the agent treats it as cancelled).
     #[serde(rename = "permission.respond", rename_all = "camelCase")]
@@ -513,8 +509,8 @@ mod tests {
     #[test]
     fn wire_format() {
         let m: ClientMsg =
-            serde_json::from_str(r#"{"type":"chat.send","text":"hi","screenshot":true,"newChat":true}"#).unwrap();
-        assert!(matches!(m, ClientMsg::ChatSend { new_chat: true, screenshot: true, .. }));
+            serde_json::from_str(r#"{"type":"chat.send","text":"hi","newChat":true}"#).unwrap();
+        assert!(matches!(m, ClientMsg::ChatSend { new_chat: true, .. }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"ui.setMode","mode":"expanded"}"#).unwrap();
         assert!(matches!(m, ClientMsg::UiSetMode { mode: PanelMode::Expanded }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"ui.resizeStart","edge":"nw"}"#).unwrap();
@@ -524,10 +520,10 @@ mod tests {
         let m: ClientMsg = serde_json::from_str(r#"{"type":"chat.open","id":"c1"}"#).unwrap();
         assert!(matches!(m, ClientMsg::ChatOpen { id } if id == "c1"));
         let m: ClientMsg = serde_json::from_str(
-            r#"{"type":"game.update","exe":"cs2.exe","name":null,"instructions":"x","sources":"","screenshot":false}"#,
+            r#"{"type":"game.update","exe":"cs2.exe","name":null,"instructions":"x","sources":""}"#,
         )
         .unwrap();
-        assert!(matches!(m, ClientMsg::GameUpdate { screenshot: Some(false), name: None, .. }));
+        assert!(matches!(m, ClientMsg::GameUpdate { name: None, .. }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"permission.respond","id":"p1","optionId":null}"#).unwrap();
         assert!(matches!(m, ClientMsg::PermissionRespond { option_id: None, .. }));
         let s = serde_json::to_string(&ServerMsg::OverlayShow { mode: PanelMode::Compact, game: None }).unwrap();

@@ -17,7 +17,7 @@ use crate::protocol::{
     AppendKind, ChatMessage, GameInfo, GameProfile, MessageStatus, Part, PermissionPrompt, Role, ServerMsg, Shot, ToolInfo,
     ToolStatus,
 };
-use crate::{games, shots};
+use crate::games;
 use crate::state::{AppState, Target};
 
 /// How often a streaming answer is written to the history (so a crash loses little).
@@ -228,7 +228,7 @@ pub fn follow_game(state: &Arc<AppState>, game: &GameInfo) {
     }
 }
 
-pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool, from_overlay: bool) {
+pub fn send(state: &Arc<AppState>, text: &str, new_chat: bool, from_overlay: bool) {
     let text = text.trim().to_string();
     if text.is_empty() {
         return;
@@ -238,8 +238,7 @@ pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool,
         id: new_id(),
         role: Role::User,
         parts: vec![Part::Text { text: text.clone() }],
-        // The frame is attached once captured and encoded (`attach_frame`).
-        screenshot: None,
+        screenshot: None, // only in chats from before the agent took frames itself
         status: MessageStatus::Done,
         error: None,
     };
@@ -281,7 +280,7 @@ pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool,
         chat.flushed = Instant::now();
         (chat.id.clone(), chat.epoch, started_new)
     };
-    let turn = Turn { chat_id, epoch, user_id: user.id.clone(), reply_id: reply.id.clone(), text, screenshot };
+    let turn = Turn { chat_id, epoch, reply_id: reply.id.clone(), text };
     if started_new {
         broadcast_chat(state);
     } else {
@@ -289,7 +288,7 @@ pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool,
         state.hub.send(Target::All, ServerMsg::ChatMessage { message: reply });
     }
     broadcast_summary(state, &turn.chat_id);
-    debug!("chat.send new_chat={started_new} screenshot={screenshot} len={}", turn.text.len());
+    debug!("chat.send new_chat={started_new} len={}", turn.text.len());
     tauri::async_runtime::spawn(run_turn(state.clone(), turn));
 }
 
@@ -329,32 +328,22 @@ fn profile_dir(state: &AppState) -> PathBuf {
 struct Turn {
     chat_id: String,
     epoch: u64,
-    user_id: String,
     reply_id: String,
     text: String,
-    /// 📷 was on: attach a frame of the game.
-    screenshot: bool,
 }
 
 /// Runs one question/answer turn: makes sure the chat has a live agent session, sends the
 /// prompt and records how it ended. Streamed content arrives separately (`handle_event`).
 async fn run_turn(state: Arc<AppState>, turn: Turn) {
-    let Turn { chat_id, epoch, user_id, reply_id: message_id, text, screenshot } = turn;
+    let Turn { chat_id: _, epoch, reply_id: message_id, text } = turn;
     let agent = state.agent.clone();
     let result = async {
-        // Capture + encode (~0.1–0.3 s) runs while the agent session starts.
-        let frame = async {
-            if screenshot { attach_frame(&state, &chat_id, epoch, &user_id).await } else { None }
-        };
-        let (frame, session) = tokio::join!(frame, ensure_session(&state, epoch));
-        let session = session?;
+        let session = ensure_session(&state, epoch).await?;
         let mut blocks = Vec::new();
         if session.needs_history {
             blocks.extend(conversation_so_far(&state, epoch).map(PromptBlock::Text));
         }
         blocks.extend(session.profile_note.map(PromptBlock::Text));
-        // Image first, then the question (works best for vision models).
-        blocks.extend(frame);
         blocks.push(PromptBlock::Text(text));
         agent.prompt(session.id, blocks).await
     }
@@ -523,37 +512,6 @@ fn transcript(messages: &[ChatMessage], budget: usize) -> String {
     lines.join("\n\n")
 }
 
-/// Captures and encodes the game frame for the user's message and shows it on the message.
-/// Returns the prompt block: the image, or a note for the model that capturing failed.
-async fn attach_frame(state: &Arc<AppState>, chat_id: &str, epoch: u64, user_id: &str) -> Option<PromptBlock> {
-    let result = match shots::for_message(state).await {
-        Ok(frame) => shots::store(state, chat_id, frame).await,
-        Err(e) => Err(e),
-    };
-    let mut chat = state.chat.lock().unwrap();
-    if chat.epoch != epoch {
-        return None;
-    }
-    let message = chat.message_mut(user_id)?;
-    let block = match result {
-        Ok(stored) => {
-            message.screenshot = Some(stored.shot);
-            PromptBlock::Image { base64: stored.base64, mime: stored.mime.into() }
-        }
-        Err(reason) => {
-            warn!("no frame for the message: {reason}");
-            message.error = Some(format!("Кадр игры не приложен: {reason}"));
-            PromptBlock::Text(format!(
-                "(The user wanted to attach a frame of the game, but capturing it failed: {reason}.)"
-            ))
-        }
-    };
-    let message = message.clone();
-    chat.save(state, user_id);
-    state.hub.send(Target::All, ServerMsg::ChatMessage { message });
-    Some(block)
-}
-
 /// The agent's screenshot tool took a frame: show it on that tool call in the answer.
 pub fn attach_tool_shot(state: &AppState, shot: Shot) {
     let mut chat = state.chat.lock().unwrap();
@@ -615,10 +573,12 @@ const BASE_PROMPT: &str = "You are an AI assistant inside an overlay on top of a
      - For game facts you are not sure about (items, quests, bosses, builds, patch changes), use web search \
        and mention the source briefly. Don't invent details.\n\
      - Format with Markdown; keep answers short enough to read in a few seconds unless asked for detail.\n\
-     - An image attached to the user's message is a frame of the game window captured when they asked; \
-       \"this\" or \"here\" usually refers to it (the mouse cursor may point at the thing).\n\
-     - The `screenshot_game` tool captures the current frame. Call it when the question depends on what is on \
-       screen and no frame is attached, or the attached one may be outdated; not for general questions.\n";
+     - You don't see the game unless you call the `screenshot_game` tool, which returns a frame of the game \
+       window. Call it whenever the answer may depend on what is on screen: the user says \"this\", \"here\", \
+       \"what is that\", asks about their current situation, UI, map, inventory, an enemy or a puzzle, or seeing \
+       it would make the answer more precise. Don't call it for general questions about the game. The first \
+       frame after the user opens the overlay shows the moment they opened it (the mouse cursor may point at \
+       the thing); later calls take a fresh one.\n";
 
 fn system_prompt(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> String {
     format!("{BASE_PROMPT}{}", game_section(game, profile))
@@ -843,7 +803,6 @@ mod tests {
             name: Some("Hollow Knight".into()),
             instructions: "  без спойлеров  ".into(),
             sources: "hollowknight.wiki\n\n  fextralife.com ".into(),
-            screenshot: None,
         };
         let p = system_prompt(Some(&game), Some(&profile));
         assert!(p.contains("The game is Hollow Knight (window \"UnityWndClass\""), "{p}");
@@ -852,9 +811,7 @@ mod tests {
         assert!(p.contains("<instructions>\nбез спойлеров\n</instructions>"), "{p}");
 
         assert_ne!(profile_key(Some(&profile)), profile_key(None));
-        // 📷 is not told to the agent; an empty profile is the same as none.
-        let shot_only = GameProfile { screenshot: Some(true), ..profile.clone() };
-        assert_eq!(profile_key(Some(&shot_only)), profile_key(Some(&profile)));
+        // An empty profile is the same as none.
         profile = GameProfile { name: None, instructions: String::new(), sources: " \n".into(), ..profile };
         assert_eq!(system_prompt(Some(&game), Some(&profile)), plain);
         assert_eq!(profile_key(Some(&profile)), profile_key(None));

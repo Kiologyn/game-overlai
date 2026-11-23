@@ -12,7 +12,7 @@ use std::sync::Arc;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::v1::schema::{
-    CancelNotification, CloseSessionRequest, ContentBlock, HttpHeader, ImageContent, InitializeRequest,
+    CancelNotification, CloseSessionRequest, ContentBlock, HttpHeader, InitializeRequest,
     LoadSessionRequest, McpServer, McpServerHttp, NewSessionRequest, PermissionOptionKind, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
     SelectedPermissionOutcome,
@@ -202,7 +202,6 @@ fn dispatch(
                 .into_iter()
                 .map(|b| match b {
                     PromptBlock::Text(t) => text(&t),
-                    PromptBlock::Image { base64, mime } => ContentBlock::Image(ImageContent::new(base64, mime)),
                 })
                 .collect();
             let result = conn.send_request(PromptRequest::new(session_id, blocks)).block_task().await;
