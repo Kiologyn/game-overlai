@@ -17,7 +17,7 @@ use tracing::{info, warn};
 use crate::protocol::{ChatMessage, ChatSummary, GameInfo, GameProfile, Shot};
 
 /// Bumped with every schema change; `migrate` brings older files up to date.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE games (
@@ -580,6 +580,13 @@ mod tests {
         assert_eq!(h.panel_layout(""), None);
         h.clear_panel_layouts();
         assert_eq!(h.panel_layout("cs2.exe"), None);
+    }
+
+    #[test]
+    fn schema_version_is_the_last_migration() {
+        let h = History::in_memory(std::env::temp_dir().join("overlai-unused"));
+        let version: i32 = h.db.lock().unwrap().pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION, "bump SCHEMA_VERSION with every new migration");
     }
 
     #[test]

@@ -260,23 +260,45 @@ fn dispatch(
             cx.spawn(async move {
                 let request = SessionOptionsRequest::new(std::env::temp_dir()).meta((spec.session_meta)());
                 match conn.send_request(request).block_task().await {
-                    Ok(r) => {
-                        // Not a session: show the defaults with the user's choices over them.
-                        let mut options = public_options(&r.config_options.unwrap_or_default());
-                        let prefs = shared.prefs.lock().unwrap().clone();
-                        for o in &mut options {
-                            if let Some(want) = prefs.get(&o.id).filter(|w| o.values.iter().any(|v| &v.value == *w)) {
-                                o.current = want.clone();
-                            }
-                        }
-                        shared.emit(super::AgentEvent::Options(options));
-                    }
+                    Ok(r) => report_planned(&shared, &r.config_options.unwrap_or_default()),
                     Err(e) => debug!("session/options: {e}"),
                 }
                 Ok(())
             })
         }
-        Cmd::ApplyOptions { session_id: None } => Ok(()), // shown once a session exists
+        // No `session/options` (codex-acp): the options of the last session, or of a throwaway
+        // one at the start (an empty session costs no tokens), with the user's choices over them.
+        Cmd::ApplyOptions { session_id: None } => {
+            let known = shared.options.lock().unwrap().clone();
+            if !known.is_empty() {
+                report_planned(shared, &known);
+                return Ok(());
+            }
+            let shared = shared.clone();
+            cx.spawn(async move {
+                let request = NewSessionRequest::new(std::env::temp_dir()).meta((spec.session_meta)());
+                match conn.send_request(request).block_task().await {
+                    Ok(r) => {
+                        let raw = r.config_options.unwrap_or_default();
+                        let first = {
+                            let mut options = shared.options.lock().unwrap();
+                            // A real session may have reported its own meanwhile: that one wins.
+                            let first = options.is_empty();
+                            if first {
+                                *options = raw.clone();
+                            }
+                            first
+                        };
+                        if first {
+                            report_planned(&shared, &raw);
+                        }
+                        let _ = conn.send_request(CloseSessionRequest::new(r.session_id)).block_task().await;
+                    }
+                    Err(e) => debug!("options probe session: {e}"),
+                }
+                Ok(())
+            })
+        }
         Cmd::Restart => Ok(()), // handled by the command loop
         Cmd::CloseSession { session_id } => cx.spawn(async move {
             match conn.send_request(CloseSessionRequest::new(session_id.clone())).block_task().await {
@@ -310,6 +332,18 @@ async fn apply_prefs(conn: &ConnectionTo<Agent>, shared: &Shared, session_id: &s
         }
     }
     report_options(shared, options);
+}
+
+/// Options a new session will get: the agent's defaults with the user's choices over them.
+fn report_planned(shared: &Shared, options: &[RawOption]) {
+    let mut public = public_options(options);
+    let prefs = shared.prefs.lock().unwrap().clone();
+    for o in &mut public {
+        if let Some(want) = prefs.get(&o.id).filter(|w| o.values.iter().any(|v| &v.value == *w)) {
+            o.current = want.clone();
+        }
+    }
+    shared.emit(super::AgentEvent::Options(public));
 }
 
 fn report_options(shared: &Shared, options: Vec<RawOption>) {
