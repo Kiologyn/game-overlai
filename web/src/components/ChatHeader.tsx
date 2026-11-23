@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { History, MessageSquare, Plus, Search, Trash2 } from "lucide-react";
 import { groupChats } from "./chatGroups";
 import type { ChatSummary } from "../api/generated/ChatSummary";
+import type { GameProfile } from "../api/generated/GameProfile";
 import type { AgentStatus } from "../api/generated/AgentStatus";
 import type { Usage } from "../api/generated/Usage";
 
@@ -53,6 +54,7 @@ interface HeaderProps {
   agent: AgentStatus | null;
   chats: ChatSummary[];
   chatId: string | null;
+  games: GameProfile[];
   onNewChat(): void;
   onOpenChat(id: string): void;
   onDeleteChat(id: string): void;
@@ -61,7 +63,7 @@ interface HeaderProps {
 }
 
 export function ChatHeader(props: HeaderProps) {
-  const { title, usage, agent, chats, chatId, onNewChat, onOpenChat, onDeleteChat, onDragStart } = props;
+  const { title, usage, agent, chats, chatId, games, onNewChat, onOpenChat, onDeleteChat, onDragStart } = props;
   const [historyOpen, setHistoryOpen] = useState(false);
   return (
     <div
@@ -91,6 +93,7 @@ export function ChatHeader(props: HeaderProps) {
           <HistoryMenu
             chats={chats}
             chatId={chatId}
+            games={games}
             onOpenChat={(id) => {
               onOpenChat(id);
               setHistoryOpen(false);
@@ -109,6 +112,7 @@ export function ChatHeader(props: HeaderProps) {
 
 interface MenuProps {
   chats: ChatSummary[];
+  games: GameProfile[];
   chatId: string | null;
   onOpenChat(id: string): void;
   onDeleteChat(id: string): void;
@@ -116,10 +120,10 @@ interface MenuProps {
 }
 
 /** History dropdown of the overlay panel: search, chats grouped by game. */
-function HistoryMenu({ chats, chatId, onOpenChat, onDeleteChat, onClose }: MenuProps) {
+function HistoryMenu({ chats, games, chatId, onOpenChat, onDeleteChat, onClose }: MenuProps) {
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
-  const groups = useMemo(() => groupChats(chats, query), [chats, query]);
+  const groups = useMemo(() => groupChats(chats, query, games), [chats, query, games]);
 
   useEffect(() => {
     // Esc closes the menu, not the panel (capture phase: the panel hides on Esc itself).
@@ -152,10 +156,10 @@ function HistoryMenu({ chats, chatId, onOpenChat, onDeleteChat, onClose }: MenuP
       {groups.length === 0 ? (
         <div className="history-empty">{chats.length ? "Ничего не найдено" : "Чаты появятся здесь"}</div>
       ) : (
-        groups.map(([game, gameChats]) => (
-          <section className="history-group" key={game}>
-            <h2>{game}</h2>
-            {gameChats.map((chat) => (
+        groups.map((group) => (
+          <section className="history-group" key={group.key}>
+            <h2>{group.label}</h2>
+            {group.chats.map((chat) => (
               <div key={chat.id} className={`history-item${chatId === chat.id ? " active" : ""}`}>
                 <button
                   type="button"

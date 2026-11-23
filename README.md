@@ -24,6 +24,11 @@ Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel
 edges, always inside the game window; its place is remembered per game. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
 the chat in a browser is at http://127.0.0.1:47823/.
 
+Game profiles: a game's name in the browser's chat list (or the game chip in the overlay) opens its page —
+its name for the agent, standing instructions (spoilers, character, language...), sites to search first,
+the 📷 default, and its chats. The agent gets the profile in the system prompt of a new session; a resumed
+session keeps its first system prompt (Claude Code), so a changed profile is sent with the next question.
+
 ## Layout
 
 | Path | What |
@@ -31,7 +36,8 @@ the chat in a browser is at http://127.0.0.1:47823/.
 | `src-tauri/src/main.rs`, `state.rs` | startup, shared app state |
 | `src-tauri/src/overlay/` | the panel window: placement over the game, focus, capture exclusion (Win32) |
 | `src-tauri/src/agent/` | agents over ACP: adapter install, supervision, sessions, permissions; `spec.rs` = per-agent settings |
-| `src-tauri/src/chat.rs`, `history.rs` | current chat ↔ agent session; chat history in SQLite, frames on disk |
+| `src-tauri/src/chat.rs`, `history.rs` | current chat ↔ agent session, system prompt; chat history in SQLite, frames on disk |
+| `src-tauri/src/games.rs` | game profiles (per exe): name, instructions, sources, 📷 default |
 | `src-tauri/src/capture/`, `shots.rs` | game frames: Windows Graphics Capture, JPEG encoding, storage |
 | `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): `screenshot_game` |
 | `src-tauri/src/server/` | local HTTP + WebSocket server the UI talks to |
@@ -56,7 +62,8 @@ the chat in a browser is at http://127.0.0.1:47823/.
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
   `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,
   0 = full; never over 2000 px a side); saved frames stay full size.
-- History: `%LOCALAPPDATA%\game-overlai\history.db` + `shots\` (frames, deleted with their chat).
+- History: `%LOCALAPPDATA%\game-overlai\history.db` (chats, game profiles, panel places) + `shots\` (frames,
+  deleted with their chat).
 - Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).
 
 Debug switches: `OVERLAI_UI_DEV=http://localhost:5173` (UI from Vite), `OVERLAI_DEBUG_SHOW=compact|expanded`

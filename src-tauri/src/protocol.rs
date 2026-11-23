@@ -49,6 +49,24 @@ pub struct GameInfo {
     pub exe: String,
 }
 
+/// What the user told the agent about a game; one per executable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GameProfile {
+    pub exe: String,
+    /// Latest window title.
+    pub title: String,
+    /// The user's name for the game (window titles can be generic, e.g. "UnityWndClass").
+    pub name: Option<String>,
+    /// Told to the agent with every chat of this game (spoilers, character, language...).
+    pub instructions: String,
+    /// Sites the agent should search first, one per line.
+    pub sources: String,
+    /// 📷 when the panel opens over this game; `null` = as the panel had it.
+    pub screenshot: Option<bool>,
+}
+
 // ------------------------------------------------------------------ chat
 
 /// A game frame kept by the core; the image is at `/api/shots/{id}`.
@@ -274,6 +292,15 @@ pub enum ClientMsg {
     /// Delete a chat with its frames (the current one is replaced by an empty chat).
     #[serde(rename = "chat.delete")]
     ChatDelete { id: String },
+    /// Save a game's profile (applies to its chats from their next question).
+    #[serde(rename = "game.update")]
+    GameUpdate {
+        exe: String,
+        name: Option<String>,
+        instructions: String,
+        sources: String,
+        screenshot: Option<bool>,
+    },
     /// `optionId: null` = dismiss (the agent treats it as cancelled).
     #[serde(rename = "permission.respond", rename_all = "camelCase")]
     PermissionRespond { id: String, option_id: Option<String> },
@@ -316,6 +343,12 @@ pub enum ServerMsg {
     ChatsUpsert { chat: ChatSummary },
     #[serde(rename = "chats.remove")]
     ChatsRemove { id: String },
+    /// All game profiles, most recently played first (on connect).
+    #[serde(rename = "games.snapshot")]
+    GamesSnapshot { games: Vec<GameProfile> },
+    /// A game was added or its profile changed: replaces the one with the same exe.
+    #[serde(rename = "games.upsert")]
+    GamesUpsert { game: GameProfile },
     /// Pending permission prompts for the current chat (replaces the previous list).
     #[serde(rename = "permissions")]
     Permissions { prompts: Vec<PermissionPrompt> },
@@ -345,6 +378,11 @@ mod tests {
         assert!(matches!(m, ClientMsg::UiResizeStart { edge: ResizeEdge::Nw }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"chat.open","id":"c1"}"#).unwrap();
         assert!(matches!(m, ClientMsg::ChatOpen { id } if id == "c1"));
+        let m: ClientMsg = serde_json::from_str(
+            r#"{"type":"game.update","exe":"cs2.exe","name":null,"instructions":"x","sources":"","screenshot":false}"#,
+        )
+        .unwrap();
+        assert!(matches!(m, ClientMsg::GameUpdate { screenshot: Some(false), name: None, .. }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"permission.respond","id":"p1","optionId":null}"#).unwrap();
         assert!(matches!(m, ClientMsg::PermissionRespond { option_id: None, .. }));
         let s = serde_json::to_string(&ServerMsg::OverlayShow { mode: PanelMode::Compact, game: None }).unwrap();

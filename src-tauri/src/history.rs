@@ -14,10 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, params};
 use tracing::{info, warn};
 
-use crate::protocol::{ChatMessage, ChatSummary, GameInfo, Shot};
+use crate::protocol::{ChatMessage, ChatSummary, GameInfo, GameProfile, Shot};
 
 /// Bumped with every schema change; `migrate` brings older files up to date.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE games (
@@ -68,6 +68,19 @@ CREATE TABLE panel_layouts (
 );
 ";
 
+/// Game profiles: what the user tells the agent about a game (phase 7).
+const SCHEMA_V3: &str = "
+ALTER TABLE games ADD COLUMN name TEXT;                          -- the user's name for the game
+ALTER TABLE games ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
+ALTER TABLE games ADD COLUMN sources TEXT NOT NULL DEFAULT '';   -- sites to search first, one per line
+ALTER TABLE games ADD COLUMN screenshot INTEGER;                 -- 📷 default; NULL = as the panel has it
+";
+
+/// Which version of its game's profile a chat's agent session was told (`chat::profile_key`).
+const SCHEMA_V4: &str = "
+ALTER TABLE chats ADD COLUMN profile_key INTEGER;
+";
+
 /// Where the user put the overlay panel over a game, relative to the game window (so it stays
 /// in place when the game changes resolution or moves).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,6 +103,8 @@ pub struct StoredChat {
     pub title: Option<String>,
     pub agent: String,
     pub session_id: Option<String>,
+    /// Version of the game's profile the session was told.
+    pub profile_key: Option<i64>,
     pub messages: Vec<ChatMessage>,
 }
 
@@ -196,6 +211,12 @@ impl History {
         });
     }
 
+    pub fn set_profile_key(&self, chat_id: &str, key: i64) {
+        self.write("set profile key", |db| {
+            db.execute("UPDATE chats SET profile_key = ?2 WHERE id = ?1", params![chat_id, key]).map(drop)
+        });
+    }
+
     /// All chats, newest first.
     pub fn list(&self) -> Vec<ChatSummary> {
         self.read("list chats", |db| {
@@ -214,7 +235,8 @@ impl History {
         self.read("load chat", |db| {
             let Some(mut chat) = db
                 .query_row(
-                    "SELECT c.id, c.game_exe, COALESCE(g.title, c.game_title), c.agent, c.session_id, c.title
+                    "SELECT c.id, c.game_exe, COALESCE(g.title, c.game_title), c.agent, c.session_id, c.title,
+                            c.profile_key
                      FROM chats c LEFT JOIN games g ON g.exe = c.game_exe WHERE c.id = ?1",
                     [id],
                     |r| {
@@ -224,6 +246,7 @@ impl History {
                             agent: r.get(3)?,
                             session_id: r.get(4)?,
                             title: r.get(5)?,
+                            profile_key: r.get(6)?,
                             messages: vec![],
                         })
                     },
@@ -315,7 +338,50 @@ impl History {
     }
 }
 
+/// What the user can change in a game's profile.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProfileEdit {
+    pub name: Option<String>,
+    pub instructions: String,
+    pub sources: String,
+    pub screenshot: Option<bool>,
+}
+
 impl History {
+    /// All games with chats or a profile, most recently played first.
+    pub fn games(&self) -> Vec<GameProfile> {
+        self.read("list games", |db| {
+            let mut q = db.prepare(&format!("{GAME} ORDER BY last_seen DESC"))?;
+            q.query_map([], game_row)?.collect()
+        })
+    }
+
+    pub fn game(&self, exe: &str) -> Option<GameProfile> {
+        if exe.is_empty() {
+            return None;
+        }
+        self.read("game profile", |db| db.query_row(&format!("{GAME} WHERE exe = ?1"), [exe], game_row).optional())
+    }
+
+    /// Saves the profile (a game not seen yet is added with `title`). Returns the stored profile.
+    pub fn update_game(&self, exe: &str, title: &str, edit: &ProfileEdit) -> Option<GameProfile> {
+        if exe.is_empty() {
+            return None;
+        }
+        let name = edit.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+        self.write("update game", |db| {
+            db.execute(
+                "INSERT INTO games (exe, title, last_seen, name, instructions, sources, screenshot)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT (exe) DO UPDATE SET name = excluded.name, instructions = excluded.instructions,
+                     sources = excluded.sources, screenshot = excluded.screenshot",
+                params![exe, title, now_ms(), name, edit.instructions.trim(), edit.sources.trim(), edit.screenshot],
+            )
+            .map(drop)
+        });
+        self.game(exe)
+    }
+
     pub fn panel_layout(&self, game_exe: &str) -> Option<PanelLayout> {
         self.read("panel layout", |db| {
             db.query_row(
@@ -339,6 +405,19 @@ impl History {
             .map(drop)
         });
     }
+}
+
+const GAME: &str = "SELECT exe, title, name, instructions, sources, screenshot FROM games";
+
+fn game_row(r: &rusqlite::Row) -> rusqlite::Result<GameProfile> {
+    Ok(GameProfile {
+        exe: r.get(0)?,
+        title: r.get(1)?,
+        name: r.get(2)?,
+        instructions: r.get(3)?,
+        sources: r.get(4)?,
+        screenshot: r.get(5)?,
+    })
 }
 
 const SUMMARY: &str = "SELECT c.id, COALESCE(c.title, c.preview), c.game_exe, COALESCE(g.title, c.game_title), c.updated_at
@@ -391,6 +470,12 @@ fn migrate(db: &Connection) -> rusqlite::Result<()> {
     if version < 2 {
         db.execute_batch(&format!("BEGIN; {SCHEMA_V2} PRAGMA user_version = 2; COMMIT;"))?;
     }
+    if version < 3 {
+        db.execute_batch(&format!("BEGIN; {SCHEMA_V3} PRAGMA user_version = 3; COMMIT;"))?;
+    }
+    if version < 4 {
+        db.execute_batch(&format!("BEGIN; {SCHEMA_V4} PRAGMA user_version = 4; COMMIT;"))?;
+    }
     Ok(())
 }
 
@@ -430,6 +515,7 @@ mod tests {
         h.touch("a", 3000);
         h.set_title("a", "Смоки на Mirage");
         h.set_session("a", "claude", "sess-1");
+        h.set_profile_key("a", -42);
         assert_eq!(h.latest().as_deref(), Some("a"));
         assert_eq!(h.latest_for_game("CS2.EXE").as_deref(), Some("a")); // exe matches without case
         assert_eq!(h.latest_for_game("dota2.exe"), None);
@@ -442,6 +528,7 @@ mod tests {
 
         let chat = h.load("a").unwrap();
         assert_eq!(chat.session_id.as_deref(), Some("sess-1"));
+        assert_eq!(chat.profile_key, Some(-42));
         assert_eq!(chat.messages.len(), 2);
         assert_eq!(chat.messages[1].parts, vec![Part::Text { text: "ответ, исправленный".into() }]);
 
@@ -469,6 +556,38 @@ mod tests {
         h.save_panel_layout("CS2.EXE", &PanelLayout { width: 600.0, ..l }); // same game
         assert_eq!(h.panel_layout("cs2.exe").map(|l| l.width), Some(600.0));
         assert_eq!(h.panel_layout(""), None);
+    }
+
+    #[test]
+    fn game_profiles() {
+        let h = History::in_memory(std::env::temp_dir().join("overlai-unused"));
+        let cs2 = GameInfo { title: "Counter-Strike 2".into(), exe: "cs2.exe".into() };
+        h.create_chat("a", Some(&cs2), "claude", "вопрос", 1000);
+        let p = h.game("CS2.exe").unwrap();
+        assert_eq!((p.name, p.instructions.as_str(), p.screenshot), (None, "", None));
+
+        let edit = ProfileEdit {
+            name: Some("  CS2 ".into()),
+            instructions: " без спойлеров 
+".into(),
+            sources: "liquipedia.net".into(),
+            screenshot: Some(false),
+        };
+        let p = h.update_game("cs2.exe", "ignored for a known game", &edit).unwrap();
+        assert_eq!(p.name.as_deref(), Some("CS2"));
+        assert_eq!(p.instructions, "без спойлеров");
+        assert_eq!(p.title, "Counter-Strike 2");
+        assert_eq!(p.screenshot, Some(false));
+        // A new chat refreshes the window title but keeps the profile.
+        h.create_chat("b", Some(&GameInfo { title: "CS2 beta".into(), ..cs2 }), "claude", "ещё", 2000);
+        let p = h.game("cs2.exe").unwrap();
+        assert_eq!((p.title.as_str(), p.name.as_deref()), ("CS2 beta", Some("CS2")));
+        // A blank name clears it; a game without chats can get a profile too.
+        h.update_game("cs2.exe", "", &ProfileEdit { name: Some(" ".into()), ..edit.clone() });
+        assert_eq!(h.game("cs2.exe").unwrap().name, None);
+        h.update_game("eldenring.exe", "ELDEN RING", &edit);
+        assert_eq!(h.games().len(), 2);
+        assert!(h.update_game("", "", &edit).is_none());
     }
 
     #[test]

@@ -9,4 +9,4 @@ export type ClientMsg = { "type": "ui.hide" } | { "type": "ui.setMode", mode: Pa
 /**
  * Start a new chat with this message (sent from the quick field).
  */
-newChat: boolean, } | { "type": "chat.cancel" } | { "type": "chat.new" } | { "type": "chat.open", id: string, } | { "type": "chat.delete", id: string, } | { "type": "permission.respond", id: string, optionId: string | null, } | { "type": "ui.openUrl", url: string, };
+newChat: boolean, } | { "type": "chat.cancel" } | { "type": "chat.new" } | { "type": "chat.open", id: string, } | { "type": "chat.delete", id: string, } | { "type": "game.update", exe: string, name: string | null, instructions: string, sources: string, screenshot: boolean | null, } | { "type": "permission.respond", id: string, optionId: string | null, } | { "type": "ui.openUrl", url: string, };

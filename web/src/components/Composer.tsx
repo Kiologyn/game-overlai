@@ -14,6 +14,10 @@ interface Props {
   screenshot: boolean;
   onScreenshotChange(on: boolean): void;
   game: GameInfo | null;
+  /** Shown name of the game (the profile's name if the user gave one). */
+  gameName?: string;
+  /** Click on the game chip: open the game's profile. */
+  onOpenGame?: () => void;
   agentName: string;
   placeholder: string;
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -46,12 +50,25 @@ export function Composer(props: Props) {
           <GripVertical size={14} aria-hidden />
         </span>
       )}
-      {game && (
-        <span className="chip game" title={`${game.title} (${game.exe})`}>
-          <Gamepad2 size={14} aria-hidden />
-          <span className="chip-text">{game.title || game.exe}</span>
-        </span>
-      )}
+      {game && (() => {
+        const label = props.gameName || game.title || game.exe;
+        const content = (
+          <>
+            <Gamepad2 size={14} aria-hidden />
+            <span className="chip-text">{label}</span>
+          </>
+        );
+        const about = `${game.title}${game.exe ? ` (${game.exe})` : ""}`;
+        return props.onOpenGame && game.exe ? (
+          <button type="button" className="chip game clickable" onClick={props.onOpenGame} title={`${about} — профиль игры`}>
+            {content}
+          </button>
+        ) : (
+          <span className="chip game" title={about}>
+            {content}
+          </span>
+        );
+      })()}
       <button
         type="button"
         className={`icon-btn toggle ${screenshot ? "on" : ""}`}

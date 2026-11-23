@@ -9,7 +9,8 @@ use tracing::{debug, warn};
 use super::Ctx;
 use crate::protocol::{ClientKind, ClientMsg, ServerMsg};
 use crate::state::Target;
-use crate::{chat, overlay};
+use crate::history::ProfileEdit;
+use crate::{chat, games, overlay};
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -33,6 +34,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         ServerMsg::Hello { version: env!("CARGO_PKG_VERSION").into(), client: kind },
         chat::snapshot(&ctx.state),
         chat::chat_list(&ctx.state),
+        games::list(&ctx.state),
         chat::permissions(&ctx.state),
         ServerMsg::AgentStatus { status: ctx.state.agent_status.lock().unwrap().clone() },
     ];
@@ -69,6 +71,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
                     warn!("ws client lagged by {n} events; resending the chat snapshot");
                     if send(&mut sink, &chat::snapshot(&ctx.state)).await.is_err() { break; }
                     if send(&mut sink, &chat::chat_list(&ctx.state)).await.is_err() { break; }
+                    if send(&mut sink, &games::list(&ctx.state)).await.is_err() { break; }
                 }
                 Err(RecvError::Closed) => break,
             },
@@ -110,6 +113,9 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         ClientMsg::ChatNew => chat::new_chat(&ctx.state),
         ClientMsg::ChatOpen { id } => chat::open(&ctx.state, &id),
         ClientMsg::ChatDelete { id } => chat::delete(&ctx.state, &id),
+        ClientMsg::GameUpdate { exe, name, instructions, sources, screenshot } => {
+            games::update(&ctx.state, &exe, ProfileEdit { name, instructions, sources, screenshot })
+        }
         ClientMsg::PermissionRespond { id, option_id } => chat::respond_permission(&ctx.state, &id, option_id),
         ClientMsg::UiOpenUrl { url } => {
             if url.starts_with("https://") || url.starts_with("http://") {

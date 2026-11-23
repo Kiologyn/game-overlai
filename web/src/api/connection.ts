@@ -8,6 +8,8 @@ import type { ChatSummary } from "./generated/ChatSummary";
 import type { ClientKind } from "./generated/ClientKind";
 import type { ClientMsg } from "./generated/ClientMsg";
 import type { GameInfo } from "./generated/GameInfo";
+import type { GameProfile } from "./generated/GameProfile";
+import { sameExe } from "./games";
 import type { PanelMode } from "./generated/PanelMode";
 import type { PermissionPrompt } from "./generated/PermissionPrompt";
 import type { ServerMsg } from "./generated/ServerMsg";
@@ -21,6 +23,8 @@ export interface UiState {
   messages: ChatMessage[];
   chatId: string | null;
   chats: ChatSummary[];
+  /** Game profiles, most recently played first. */
+  games: GameProfile[];
   /** Game the current chat belongs to. */
   chatGame: GameInfo | null;
   /** Chat title given by the agent. */
@@ -48,6 +52,7 @@ const initial: UiState = {
   messages: [],
   chatId: null,
   chats: [],
+  games: [],
   chatGame: null,
   title: null,
   permissions: [],
@@ -113,6 +118,13 @@ function reduce(s: UiState, msg: ServerMsg): UiState {
     }
     case "chats.remove":
       return { ...s, chats: s.chats.filter((chat) => chat.id !== msg.id) };
+    case "games.snapshot":
+      return { ...s, games: msg.games };
+    case "games.upsert": {
+      const known = s.games.some((g) => sameExe(g.exe, msg.game.exe));
+      const games = known ? s.games.map((g) => (sameExe(g.exe, msg.game.exe) ? msg.game : g)) : [msg.game, ...s.games];
+      return { ...s, games };
+    }
     case "permissions":
       return { ...s, permissions: msg.prompts };
     case "agent.status":

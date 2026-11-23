@@ -5,6 +5,7 @@ mod agent;
 mod capture;
 mod chat;
 mod config;
+mod games;
 mod hotkeys;
 mod history;
 mod logging;

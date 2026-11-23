@@ -5,6 +5,7 @@ import type { ChatMessage } from "./ChatMessage";
 import type { ChatSummary } from "./ChatSummary";
 import type { ClientKind } from "./ClientKind";
 import type { GameInfo } from "./GameInfo";
+import type { GameProfile } from "./GameProfile";
 import type { MessageStatus } from "./MessageStatus";
 import type { PanelMode } from "./PanelMode";
 import type { PermissionPrompt } from "./PermissionPrompt";
@@ -14,4 +15,4 @@ import type { Usage } from "./Usage";
 /**
  * core -> UI.
  */
-export type ServerMsg = { "type": "hello", version: string, client: ClientKind, } | { "type": "chat.snapshot", chatId: string, messages: Array<ChatMessage>, game: GameInfo | null, title: string | null, } | { "type": "chat.message", message: ChatMessage, } | { "type": "chat.append", messageId: string, kind: AppendKind, text: string, } | { "type": "chat.tool", messageId: string, tool: ToolInfo, } | { "type": "chat.status", messageId: string, status: MessageStatus, error: string | null, } | { "type": "chat.title", title: string, } | { "type": "chats.snapshot", chats: Array<ChatSummary>, } | { "type": "chats.upsert", chat: ChatSummary, } | { "type": "chats.remove", id: string, } | { "type": "permissions", prompts: Array<PermissionPrompt>, } | { "type": "agent.status", status: AgentStatus, } | { "type": "agent.usage", usage: Usage, } | { "type": "overlay.show", mode: PanelMode, game: GameInfo | null, } | { "type": "overlay.hidden" };
+export type ServerMsg = { "type": "hello", version: string, client: ClientKind, } | { "type": "chat.snapshot", chatId: string, messages: Array<ChatMessage>, game: GameInfo | null, title: string | null, } | { "type": "chat.message", message: ChatMessage, } | { "type": "chat.append", messageId: string, kind: AppendKind, text: string, } | { "type": "chat.tool", messageId: string, tool: ToolInfo, } | { "type": "chat.status", messageId: string, status: MessageStatus, error: string | null, } | { "type": "chat.title", title: string, } | { "type": "chats.snapshot", chats: Array<ChatSummary>, } | { "type": "chats.upsert", chat: ChatSummary, } | { "type": "chats.remove", id: string, } | { "type": "games.snapshot", games: Array<GameProfile>, } | { "type": "games.upsert", game: GameProfile, } | { "type": "permissions", prompts: Array<PermissionPrompt>, } | { "type": "agent.status", status: AgentStatus, } | { "type": "agent.usage", usage: Usage, } | { "type": "overlay.show", mode: PanelMode, game: GameInfo | null, } | { "type": "overlay.hidden" };

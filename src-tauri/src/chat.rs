@@ -14,10 +14,10 @@ use crate::agent::{AgentEvent, PromptBlock, StopReason, Update};
 use crate::history::{StoredChat, now_ms};
 use crate::mcp::SCREENSHOT_TOOL;
 use crate::protocol::{
-    AppendKind, ChatMessage, GameInfo, MessageStatus, Part, PermissionPrompt, Role, ServerMsg, Shot, ToolInfo,
+    AppendKind, ChatMessage, GameInfo, GameProfile, MessageStatus, Part, PermissionPrompt, Role, ServerMsg, Shot, ToolInfo,
     ToolStatus,
 };
-use crate::shots;
+use crate::{games, shots};
 use crate::state::{AppState, Target};
 
 /// How often a streaming answer is written to the history (so a crash loses little).
@@ -37,6 +37,9 @@ pub struct ChatState {
     /// Agent process generation the session is live in; `None` or another one means
     /// "restore it first".
     session_generation: Option<u64>,
+    /// Version of the game's profile the session was told (`profile_key`). A resumed session
+    /// keeps its first system prompt, so a newer profile goes into the next question instead.
+    session_profile: Option<u64>,
     /// The assistant message being streamed.
     active: Option<String>,
     pub permissions: Vec<PermissionPrompt>,
@@ -58,6 +61,7 @@ impl ChatState {
             saved: false,
             session_id: None,
             session_generation: None,
+            session_profile: None,
             active: None,
             permissions: vec![],
             pending_tool_shot: None,
@@ -82,6 +86,7 @@ impl ChatState {
             title: stored.title,
             saved: true,
             session_id: stored.session_id.filter(|_| stored.agent == agent),
+            session_profile: stored.profile_key.filter(|_| stored.agent == agent).map(|k| k as u64),
             ..Self::empty(None)
         }
     }
@@ -259,6 +264,9 @@ pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool)
         } else {
             state.history.create_chat(&chat.id, chat.game.as_ref(), state.agent.spec.id, &text, now);
             chat.saved = true;
+            if let Some(g) = &chat.game {
+                games::broadcast(state, &g.exe); // a new game, or its latest window title
+            }
         }
         chat.messages.push(user.clone());
         chat.messages.push(reply.clone());
@@ -339,6 +347,7 @@ async fn run_turn(state: Arc<AppState>, turn: Turn) {
         if session.needs_history {
             blocks.extend(conversation_so_far(&state, epoch).map(PromptBlock::Text));
         }
+        blocks.extend(session.profile_note.map(PromptBlock::Text));
         // Image first, then the question (works best for vision models).
         blocks.extend(frame);
         blocks.push(PromptBlock::Text(text));
@@ -370,48 +379,71 @@ struct Session {
     id: String,
     /// A new session for a chat that already has messages: the agent hasn't seen them.
     needs_history: bool,
+    /// The game's profile changed since the session was told it: the new one, for this prompt.
+    profile_note: Option<String>,
 }
 
 /// The chat's agent session: a new one, the live one, or the earlier one restored (after a
 /// restart of the agent or the app). If it can't be restored, a new one is started.
 async fn ensure_session(state: &Arc<AppState>, epoch: u64) -> Result<Session, String> {
     let agent = &state.agent;
-    let (chat_id, session, live_in, game, earlier) = {
+    let (chat_id, session, live_in, known_profile, game, earlier) = {
         let chat = state.chat.lock().unwrap();
         // The last two messages are this turn's question and answer.
         let earlier = chat.messages.len() > 2;
-        (chat.id.clone(), chat.session_id.clone(), chat.session_generation, chat.game.clone(), earlier)
+        let (id, generation, known) = (chat.session_id.clone(), chat.session_generation, chat.session_profile);
+        (chat.id.clone(), id, generation, known, chat.game.clone(), earlier)
     };
     let cwd = profile_dir(state);
-    let prompt = system_prompt(game.as_ref());
-    let session = match session {
-        Some(id) if live_in == Some(agent.generation()) => Session { id, needs_history: false },
+    let profile = game.as_ref().and_then(|g| games::profile(state, &g.exe));
+    let key = profile_key(profile.as_ref());
+    let prompt = system_prompt(game.as_ref(), profile.as_ref());
+    // (id, a new session: its system prompt has the current profile)
+    let (id, needs_history, new) = match session {
+        Some(id) if live_in == Some(agent.generation()) => (id, false, false),
         Some(id) => {
             let started = Instant::now();
             match agent.restore_session(id.clone(), cwd.clone(), prompt.clone()).await {
                 Ok(()) => {
                     info!("agent session {id} restored in {} ms", started.elapsed().as_millis());
-                    Session { id, needs_history: false }
+                    (id, false, false)
                 }
                 Err(e) => {
                     warn!("agent session {id} can't be restored ({e}); a new one gets the chat so far");
-                    Session { id: agent.new_session(cwd, prompt).await?, needs_history: earlier }
+                    (agent.new_session(cwd, prompt).await?, earlier, true)
                 }
             }
         }
-        None => Session { id: agent.new_session(cwd, prompt).await?, needs_history: earlier },
+        None => (agent.new_session(cwd, prompt).await?, earlier, true),
     };
+    // A continued session was told an older profile (chats from before profiles: none at all).
+    let outdated = match known_profile {
+        Some(known) => known != key,
+        None => key != profile_key(None),
+    };
+    let profile_note = (!new && outdated).then(|| {
+        info!("chat {chat_id}: the game's profile changed; the agent gets the new one with this question");
+        format!(
+            "(Note from the overlay app, not written by the user: the game's profile was changed since this \
+             conversation started. From now on it replaces anything said about the game earlier:\n{})",
+            game_section(game.as_ref(), profile.as_ref()).trim_end()
+        )
+    });
     let mut chat = state.chat.lock().unwrap();
     if chat.epoch != epoch {
         return Err("чат закрыт".to_string());
     }
-    if chat.session_id.as_deref() != Some(&session.id) {
-        debug!("chat {chat_id}: agent session {}", session.id);
-        state.history.set_session(&chat_id, agent.spec.id, &session.id);
+    if chat.session_id.as_deref() != Some(&id) {
+        debug!("chat {chat_id}: agent session {id}");
+        state.history.set_session(&chat_id, agent.spec.id, &id);
     }
-    chat.session_id = Some(session.id.clone());
+    if chat.session_profile != Some(key) {
+        state.history.set_profile_key(&chat_id, key as i64);
+    }
+    chat.session_id = Some(id.clone());
     chat.session_generation = Some(agent.generation());
-    Ok(session)
+    chat.session_profile = Some(key);
+    Ok(Session { id, needs_history, profile_note })
 }
 
 /// Total size of the earlier conversation given to a new session (newest messages kept).
@@ -544,27 +576,71 @@ fn humanize_error(e: &str, login_hint: &str) -> String {
     }
 }
 
-fn system_prompt(game: Option<&GameInfo>) -> String {
-    let mut p = String::from(
-        "You are an AI assistant inside an overlay on top of a video game. The user is playing right now \
-         and reads your answers between actions.\n\
-         - Lead with the answer. Be brief and concrete; use short numbered steps for instructions.\n\
-         - Reply in the language the user writes in.\n\
-         - For game facts you are not sure about (items, quests, bosses, builds, patch changes), use web search \
-           and mention the source briefly. Don't invent details.\n\
-         - Format with Markdown; keep answers short enough to read in a few seconds unless asked for detail.\n\
-         - An image attached to the user's message is a frame of the game window captured when they asked; \
-           \"this\" or \"here\" usually refers to it (the mouse cursor may point at the thing).\n\
-         - The `screenshot_game` tool captures the current frame. Call it when the question depends on what is on \
-           screen and no frame is attached, or the attached one may be outdated; not for general questions.\n",
-    );
-    match game {
-        Some(g) if !g.title.is_empty() || !g.exe.is_empty() => p.push_str(&format!(
+/// Identifies what a session is told about the game's profile (the name, instructions and
+/// sources; not the 📷 default).
+fn profile_key(profile: Option<&GameProfile>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    if let Some(p) = profile {
+        p.name.as_deref().unwrap_or("").trim().hash(&mut h);
+        p.instructions.trim().hash(&mut h);
+        p.sources.trim().hash(&mut h);
+    } else {
+        ("", "", "").hash(&mut h);
+    }
+    h.finish()
+}
+
+const BASE_PROMPT: &str = "You are an AI assistant inside an overlay on top of a video game. The user is playing right \
+     now and reads your answers between actions.\n\
+     - Lead with the answer. Be brief and concrete; use short numbered steps for instructions.\n\
+     - Reply in the language the user writes in.\n\
+     - For game facts you are not sure about (items, quests, bosses, builds, patch changes), use web search \
+       and mention the source briefly. Don't invent details.\n\
+     - Format with Markdown; keep answers short enough to read in a few seconds unless asked for detail.\n\
+     - An image attached to the user's message is a frame of the game window captured when they asked; \
+       \"this\" or \"here\" usually refers to it (the mouse cursor may point at the thing).\n\
+     - The `screenshot_game` tool captures the current frame. Call it when the question depends on what is on \
+       screen and no frame is attached, or the attached one may be outdated; not for general questions.\n";
+
+fn system_prompt(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> String {
+    format!("{BASE_PROMPT}{}", game_section(game, profile))
+}
+
+/// What the agent is told about the game: which one it is and the user's profile of it.
+fn game_section(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> String {
+    let mut p = String::new();
+    let name = profile.and_then(|p| p.name.as_deref()).filter(|n| !n.is_empty());
+    match (game, name) {
+        (Some(g), Some(name)) => p.push_str(&format!(
+            "- The game is {name} (window \"{}\", process {}). Unless the user names another game, questions are \
+             about this game.\n",
+            g.title, g.exe
+        )),
+        (Some(g), None) if !g.title.is_empty() || !g.exe.is_empty() => p.push_str(&format!(
             "- The game window is \"{}\" (process {}). Unless the user names another game, questions are about \
              this game. The window title may be generic: infer the game from it and the process name.\n",
             g.title, g.exe
         )),
         _ => p.push_str("- The game is unknown; ask which game if it matters.\n"),
+    }
+    let Some(profile) = profile else { return p };
+    let sources: Vec<&str> = profile.sources.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if !sources.is_empty() {
+        p.push_str(
+            "\nPreferred sources for this game: search these first (e.g. with `site:`) and prefer them when \
+             citing; use other sites only when these don't have the answer.\n",
+        );
+        for s in sources {
+            p.push_str(&format!("- {s}\n"));
+        }
+    }
+    let instructions = profile.instructions.trim();
+    if !instructions.is_empty() {
+        p.push_str(&format!(
+            "\nThe user's standing instructions for this game. Follow them in every answer; they take priority \
+             over the defaults above:\n<instructions>\n{instructions}\n</instructions>\n"
+        ));
     }
     p
 }
@@ -735,6 +811,36 @@ mod tests {
     }
 
     #[test]
+    fn system_prompt_carries_the_game_profile() {
+        let game = GameInfo { title: "UnityWndClass".into(), exe: "hollow.exe".into() };
+        let plain = system_prompt(Some(&game), None);
+        assert!(plain.contains("\"UnityWndClass\" (process hollow.exe)") && plain.contains("infer the game"));
+        assert!(!plain.contains("<instructions>") && !plain.contains("Preferred sources"));
+
+        let mut profile = GameProfile {
+            exe: "hollow.exe".into(),
+            title: "UnityWndClass".into(),
+            name: Some("Hollow Knight".into()),
+            instructions: "  без спойлеров  ".into(),
+            sources: "hollowknight.wiki\n\n  fextralife.com ".into(),
+            screenshot: None,
+        };
+        let p = system_prompt(Some(&game), Some(&profile));
+        assert!(p.contains("The game is Hollow Knight (window \"UnityWndClass\""), "{p}");
+        assert!(!p.contains("infer the game"));
+        assert!(p.contains("- hollowknight.wiki\n- fextralife.com\n"), "{p}");
+        assert!(p.contains("<instructions>\nбез спойлеров\n</instructions>"), "{p}");
+
+        assert_ne!(profile_key(Some(&profile)), profile_key(None));
+        // 📷 is not told to the agent; an empty profile is the same as none.
+        let shot_only = GameProfile { screenshot: Some(true), ..profile.clone() };
+        assert_eq!(profile_key(Some(&shot_only)), profile_key(Some(&profile)));
+        profile = GameProfile { name: None, instructions: String::new(), sources: " \n".into(), ..profile };
+        assert_eq!(system_prompt(Some(&game), Some(&profile)), plain);
+        assert_eq!(profile_key(Some(&profile)), profile_key(None));
+    }
+
+    #[test]
     fn stored_chat_keeps_its_session_only_for_the_same_agent() {
         let stored = |agent: &str| StoredChat {
             id: "c".into(),
@@ -742,10 +848,12 @@ mod tests {
             title: Some("t".into()),
             agent: agent.into(),
             session_id: Some("s".into()),
+            profile_key: Some(7),
             messages: vec![ChatMessage { status: MessageStatus::Streaming, ..msg(Role::Assistant, vec![text("ha")]) }],
         };
         let chat = ChatState::from_stored(stored("claude"), "claude");
         assert_eq!(chat.session_id.as_deref(), Some("s"));
+        assert_eq!(chat.session_profile, Some(7));
         assert_eq!(chat.session_generation, None, "restored before the first prompt");
         assert_eq!(chat.messages[0].status, MessageStatus::Cancelled, "interrupted answers don't stay streaming");
         assert!(chat.saved);

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isBusy, type Connection } from "../api/connection";
 import type { PanelMode } from "../api/generated/PanelMode";
 import type { ResizeEdge } from "../api/generated/ResizeEdge";
+import { findProfile, gameLabel, gamePageUrl } from "../api/games";
 import { useStoredFlag, useUiState } from "../api/hooks";
 import { AgentNotice, ChatHeader } from "../components/ChatHeader";
 import { Composer } from "../components/Composer";
@@ -17,7 +18,9 @@ export function Panel({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
   const [mode, setMode] = useState<PanelMode>("compact");
   const [draft, setDraft] = useState("");
-  const [screenshot, setScreenshot] = useStoredFlag("overlai.screenshot", true);
+  const [storedShot, setStoredShot] = useStoredFlag("overlai.screenshot", true);
+  /** 📷 toggled while the panel is open over a game whose profile sets a default. */
+  const [shotOverride, setShotOverride] = useState<boolean | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = isBusy(ui);
 
@@ -25,6 +28,7 @@ export function Panel({ conn }: { conn: Connection }) {
   useEffect(() => {
     if (ui.overlay.showSeq === 0) return;
     setMode(ui.overlay.mode);
+    setShotOverride(null); // each opening starts from the game's default
     const focus = () => inputRef.current?.focus();
     focus();
     requestAnimationFrame(focus);
@@ -61,6 +65,11 @@ export function Panel({ conn }: { conn: Connection }) {
   const startResize = useCallback((edge: ResizeEdge) => conn.send({ type: "ui.resizeStart", edge }), [conn]);
 
   const game = mode === "expanded" ? (ui.chatGame ?? ui.overlay.game) : ui.overlay.game;
+  // The game's profile may set 📷 for it; otherwise the panel keeps the last choice.
+  const profileShot = findProfile(ui.games, ui.overlay.game?.exe)?.screenshot ?? null;
+  const screenshot = shotOverride ?? profileShot ?? storedShot;
+  const setScreenshot = (on: boolean) => (profileShot === null ? setStoredShot(on) : setShotOverride(on));
+  const openGame = game?.exe ? () => conn.send({ type: "ui.openUrl", url: gamePageUrl(game.exe) }) : undefined;
   const agentDown = ui.agent?.state === "error";
 
   return (
@@ -76,6 +85,7 @@ export function Panel({ conn }: { conn: Connection }) {
                 onDragStart={startDrag}
                 chats={ui.chats}
                 chatId={ui.chatId}
+                games={ui.games}
                 onNewChat={() => {
                   conn.send({ type: "chat.new" });
                   inputRef.current?.focus();
@@ -102,6 +112,8 @@ export function Panel({ conn }: { conn: Connection }) {
             screenshot={screenshot}
             onScreenshotChange={setScreenshot}
             game={game}
+            gameName={gameLabel(game, ui.games)}
+            onOpenGame={openGame}
             agentName={ui.agent?.agent ?? "Claude"}
             placeholder={
               mode === "compact"

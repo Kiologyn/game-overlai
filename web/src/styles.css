@@ -1106,3 +1106,190 @@ html[data-surface="overlay"] .shot-viewer {
   pointer-events: none;
   visibility: hidden;
 }
+
+/* ------------------------------------------------------------------ game profiles */
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn.primary:disabled:hover {
+  background: var(--primary);
+}
+
+.chip.clickable {
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip.clickable:hover {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.history-group-title {
+  width: calc(100% - 8px);
+  margin: 12px 4px 4px;
+  padding: 3px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-group-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-group-title svg {
+  flex: none;
+  opacity: 0;
+}
+
+.history-group-title:hover,
+.history-group-title.active {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.history-group-title:hover svg,
+.history-group-title.active svg {
+  opacity: 1;
+}
+
+.page-game {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.game-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.game-page-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.game-page-title {
+  min-width: 0;
+}
+
+.game-page-title h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-page-title span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.game-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field :is(input, textarea, select) {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.45;
+}
+
+.field select {
+  align-self: flex-start;
+  width: auto;
+  min-width: 220px;
+}
+
+.field :is(input, textarea, select):focus {
+  border-color: var(--muted);
+}
+
+.field :is(input, textarea)::placeholder {
+  color: #5f5f5f;
+}
+
+.game-form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.game-form-actions .btn {
+  height: 32px;
+}
+
+.game-form-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.game-chats h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.game-chat-date {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
