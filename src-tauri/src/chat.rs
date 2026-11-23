@@ -1,0 +1,754 @@
+//! The current chat and its link to the agent: one agent session per chat, streamed into an
+//! assistant message part by part. Chats are kept in the history (`history.rs`): a chat is
+//! saved with its first message, and any saved chat can be made current again; its agent
+//! session is then resumed, or (if the agent lost it) a new one gets the conversation so far.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use tokio::sync::mpsc;
+use tracing::{debug, info, warn};
+
+use crate::agent::{AgentEvent, PromptBlock, StopReason, Update};
+use crate::history::{StoredChat, now_ms};
+use crate::mcp::SCREENSHOT_TOOL;
+use crate::protocol::{
+    AppendKind, ChatMessage, GameInfo, MessageStatus, Part, PermissionPrompt, Role, ServerMsg, Shot, ToolInfo,
+    ToolStatus,
+};
+use crate::shots;
+use crate::state::{AppState, Target};
+
+/// How often a streaming answer is written to the history (so a crash loses little).
+const FLUSH_EVERY: Duration = Duration::from_secs(2);
+
+#[derive(Debug)]
+pub struct ChatState {
+    /// Id in the history. An empty new chat has one too; it is saved with its first message.
+    pub id: String,
+    pub messages: Vec<ChatMessage>,
+    pub game: Option<GameInfo>,
+    pub title: Option<String>,
+    /// Already in the history.
+    saved: bool,
+    /// Agent session of this chat.
+    session_id: Option<String>,
+    /// Agent process generation the session is live in; `None` or another one means
+    /// "restore it first".
+    session_generation: Option<u64>,
+    /// The assistant message being streamed.
+    active: Option<String>,
+    pub permissions: Vec<PermissionPrompt>,
+    /// Frame the agent's screenshot tool took before its tool call reached us.
+    pending_tool_shot: Option<Shot>,
+    /// Changes whenever another chat becomes current, so late results of the old one are dropped.
+    epoch: u64,
+    /// When the streaming answer was last written to the history.
+    flushed: Instant,
+}
+
+impl ChatState {
+    pub fn empty(game: Option<GameInfo>) -> Self {
+        Self {
+            id: new_id(),
+            messages: vec![],
+            game,
+            title: None,
+            saved: false,
+            session_id: None,
+            session_generation: None,
+            active: None,
+            permissions: vec![],
+            pending_tool_shot: None,
+            epoch: 0,
+            flushed: Instant::now(),
+        }
+    }
+
+    /// A chat from the history. Its session is resumed on the next question if it belongs to
+    /// `agent` (another agent can't continue it: it gets the conversation as text instead).
+    pub fn from_stored(stored: StoredChat, agent: &str) -> Self {
+        let mut messages = stored.messages;
+        for m in &mut messages {
+            if m.status == MessageStatus::Streaming {
+                m.status = MessageStatus::Cancelled; // the app closed while it was answering
+            }
+        }
+        Self {
+            id: stored.id,
+            messages,
+            game: stored.game,
+            title: stored.title,
+            saved: true,
+            session_id: stored.session_id.filter(|_| stored.agent == agent),
+            ..Self::empty(None)
+        }
+    }
+
+    fn message_mut(&mut self, id: &str) -> Option<&mut ChatMessage> {
+        self.messages.iter_mut().find(|m| m.id == id)
+    }
+
+    /// Writes one message (by id) to the history.
+    fn save(&self, state: &AppState, id: &str) {
+        if !self.saved {
+            return;
+        }
+        if let Some(seq) = self.messages.iter().position(|m| m.id == id) {
+            state.history.save_message(&self.id, seq, &self.messages[seq]);
+        }
+    }
+}
+
+pub fn snapshot(state: &AppState) -> ServerMsg {
+    let chat = state.chat.lock().unwrap();
+    ServerMsg::ChatSnapshot {
+        chat_id: chat.id.clone(),
+        messages: chat.messages.clone(),
+        game: chat.game.clone(),
+        title: chat.title.clone(),
+    }
+}
+
+pub fn permissions(state: &AppState) -> ServerMsg {
+    ServerMsg::Permissions { prompts: state.chat.lock().unwrap().permissions.clone() }
+}
+
+pub fn chat_list(state: &AppState) -> ServerMsg {
+    ServerMsg::ChatsSnapshot { chats: state.history.list() }
+}
+
+fn new_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Makes `next` the current chat. The old one is left: an answer still streaming is stopped
+/// and saved as it is, and its agent session is closed; it is resumed if the user comes back.
+fn switch_to(state: &AppState, chat: &mut ChatState, mut next: ChatState) {
+    if let Some(active) = chat.active.take() {
+        if let Some(session_id) = chat.session_id.clone() {
+            state.agent.cancel(session_id);
+        }
+        if let Some(m) = chat.message_mut(&active)
+            && m.status == MessageStatus::Streaming
+        {
+            m.status = MessageStatus::Cancelled;
+        }
+        chat.save(state, &active);
+    }
+    if let Some(old) = chat.session_id.take() {
+        state.agent.close_session(old);
+    }
+    next.epoch = chat.epoch + 1;
+    *chat = next;
+}
+
+fn broadcast_chat(state: &AppState) {
+    state.hub.send(Target::All, snapshot(state));
+    state.hub.send(Target::All, permissions(state));
+}
+
+/// The list entry of a saved chat changed (new chat, new question, title).
+fn broadcast_summary(state: &AppState, chat_id: &str) {
+    if let Some(chat) = state.history.summary(chat_id) {
+        state.hub.send(Target::All, ServerMsg::ChatsUpsert { chat });
+    }
+}
+
+pub fn new_chat(state: &Arc<AppState>) {
+    let game = state.overlay.lock().unwrap().game.clone();
+    switch_to(state, &mut state.chat.lock().unwrap(), ChatState::empty(game));
+    broadcast_chat(state);
+}
+
+/// Makes a chat from the history the current one.
+pub fn open(state: &Arc<AppState>, id: &str) {
+    if state.chat.lock().unwrap().id == id {
+        return;
+    }
+    let Some(stored) = state.history.load(id) else {
+        warn!("chat.open: {id} is not in the history");
+        return;
+    };
+    debug!("open chat {id} ({} messages)", stored.messages.len());
+    switch_to(state, &mut state.chat.lock().unwrap(), ChatState::from_stored(stored, state.agent.spec.id));
+    broadcast_chat(state);
+}
+
+/// Deletes a chat with its frames. The current chat is replaced by an empty one (same game).
+pub fn delete(state: &Arc<AppState>, id: &str) {
+    let was_current = {
+        let mut chat = state.chat.lock().unwrap();
+        let current = chat.id == id;
+        if current {
+            let game = chat.game.clone();
+            switch_to(state, &mut chat, ChatState::empty(game));
+        }
+        current
+    };
+    if state.history.delete(id) {
+        info!("chat {id} deleted");
+        state.hub.send(Target::All, ServerMsg::ChatsRemove { id: id.to_string() });
+    }
+    if was_current {
+        broadcast_chat(state);
+    }
+}
+
+/// Alt+W over a game: if the current chat is about another game (or none) and this game has
+/// chats, its latest chat opens. Otherwise the current chat stays (also over non-game windows,
+/// which have no chats). Not while an answer is streaming.
+pub fn follow_game(state: &Arc<AppState>, game: &GameInfo) {
+    if game.exe.is_empty() {
+        return;
+    }
+    let same_game = {
+        let chat = state.chat.lock().unwrap();
+        if chat.active.is_some() {
+            return;
+        }
+        chat.game.as_ref().is_some_and(|g| g.exe.eq_ignore_ascii_case(&game.exe))
+    };
+    if same_game {
+        return;
+    }
+    if let Some(id) = state.history.latest_for_game(&game.exe) {
+        debug!("Alt+W over {}: its latest chat {id}", game.exe);
+        open(state, &id);
+    }
+}
+
+pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool) {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return;
+    }
+    let game = state.overlay.lock().unwrap().game.clone();
+    let user = ChatMessage {
+        id: new_id(),
+        role: Role::User,
+        parts: vec![Part::Text { text: text.clone() }],
+        // The frame is attached once captured and encoded (`attach_frame`).
+        screenshot: None,
+        status: MessageStatus::Done,
+        error: None,
+    };
+    let reply = ChatMessage {
+        id: new_id(),
+        role: Role::Assistant,
+        parts: vec![],
+        screenshot: None,
+        status: MessageStatus::Streaming,
+        error: None,
+    };
+    let now = now_ms();
+    let (chat_id, epoch, started_new) = {
+        let mut chat = state.chat.lock().unwrap();
+        if chat.active.is_some() {
+            warn!("chat.send while an answer is streaming: ignored");
+            return;
+        }
+        // An empty chat is replaced too: it takes the game the user is in now.
+        let started_new = new_chat || chat.messages.is_empty();
+        if started_new {
+            switch_to(state, &mut chat, ChatState::empty(game));
+        }
+        if chat.saved {
+            state.history.touch(&chat.id, now);
+        } else {
+            state.history.create_chat(&chat.id, chat.game.as_ref(), state.agent.spec.id, &text, now);
+            chat.saved = true;
+        }
+        chat.messages.push(user.clone());
+        chat.messages.push(reply.clone());
+        chat.save(state, &user.id);
+        chat.save(state, &reply.id);
+        chat.active = Some(reply.id.clone());
+        chat.flushed = Instant::now();
+        (chat.id.clone(), chat.epoch, started_new)
+    };
+    let turn = Turn { chat_id, epoch, user_id: user.id.clone(), reply_id: reply.id.clone(), text, screenshot };
+    if started_new {
+        broadcast_chat(state);
+    } else {
+        state.hub.send(Target::All, ServerMsg::ChatMessage { message: user });
+        state.hub.send(Target::All, ServerMsg::ChatMessage { message: reply });
+    }
+    broadcast_summary(state, &turn.chat_id);
+    debug!("chat.send new_chat={started_new} screenshot={screenshot} len={}", turn.text.len());
+    tauri::async_runtime::spawn(run_turn(state.clone(), turn));
+}
+
+/// Stops the answer being generated (the prompt then ends with "cancelled").
+pub fn cancel(state: &Arc<AppState>) {
+    let session = {
+        let chat = state.chat.lock().unwrap();
+        chat.active.as_ref().and(chat.session_id.clone())
+    };
+    if let Some(session_id) = session {
+        state.agent.cancel(session_id);
+    }
+}
+
+pub fn respond_permission(state: &Arc<AppState>, id: &str, option_id: Option<String>) {
+    if !state.agent.respond_permission(id, option_id) {
+        debug!("permission {id} already resolved");
+    }
+}
+
+/// Saves the answer being streamed as it is (the app is quitting).
+pub fn flush(state: &AppState) {
+    let chat = state.chat.lock().unwrap();
+    if let Some(active) = &chat.active {
+        chat.save(state, active);
+    }
+}
+
+fn profile_dir(state: &AppState) -> PathBuf {
+    // One shared profile for now; per-game profiles come in phase 7. Sessions are resumed with
+    // the same directory, so it must not change for existing chats.
+    let dir = state.profiles_dir.join("default");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+struct Turn {
+    chat_id: String,
+    epoch: u64,
+    user_id: String,
+    reply_id: String,
+    text: String,
+    /// 📷 was on: attach a frame of the game.
+    screenshot: bool,
+}
+
+/// Runs one question/answer turn: makes sure the chat has a live agent session, sends the
+/// prompt and records how it ended. Streamed content arrives separately (`handle_event`).
+async fn run_turn(state: Arc<AppState>, turn: Turn) {
+    let Turn { chat_id, epoch, user_id, reply_id: message_id, text, screenshot } = turn;
+    let agent = state.agent.clone();
+    let result = async {
+        // Capture + encode (~0.1–0.3 s) runs while the agent session starts.
+        let frame = async {
+            if screenshot { attach_frame(&state, &chat_id, epoch, &user_id).await } else { None }
+        };
+        let (frame, session) = tokio::join!(frame, ensure_session(&state, epoch));
+        let session = session?;
+        let mut blocks = Vec::new();
+        if session.needs_history {
+            blocks.extend(conversation_so_far(&state, epoch).map(PromptBlock::Text));
+        }
+        // Image first, then the question (works best for vision models).
+        blocks.extend(frame);
+        blocks.push(PromptBlock::Text(text));
+        agent.prompt(session.id, blocks).await
+    }
+    .await;
+
+    let (status, error) = match result {
+        Ok(StopReason::EndTurn) | Ok(StopReason::Other(_)) => (MessageStatus::Done, None),
+        Ok(StopReason::Cancelled) => (MessageStatus::Cancelled, None),
+        Ok(StopReason::Refusal) => (MessageStatus::Error, Some("Модель отказалась отвечать на этот запрос.".into())),
+        Ok(StopReason::MaxTokens) => (MessageStatus::Error, Some("Ответ оборвался: достигнут лимит длины.".into())),
+        Err(e) => (MessageStatus::Error, Some(humanize_error(&e, agent.spec.login_hint))),
+    };
+    let mut chat = state.chat.lock().unwrap();
+    if chat.epoch != epoch {
+        return; // another chat became current meanwhile (the answer was saved then)
+    }
+    chat.active = None;
+    if let Some(m) = chat.message_mut(&message_id) {
+        m.status = status;
+        m.error = error.clone();
+    }
+    chat.save(&state, &message_id);
+    state.hub.send(Target::All, ServerMsg::ChatStatus { message_id, status, error });
+}
+
+struct Session {
+    id: String,
+    /// A new session for a chat that already has messages: the agent hasn't seen them.
+    needs_history: bool,
+}
+
+/// The chat's agent session: a new one, the live one, or the earlier one restored (after a
+/// restart of the agent or the app). If it can't be restored, a new one is started.
+async fn ensure_session(state: &Arc<AppState>, epoch: u64) -> Result<Session, String> {
+    let agent = &state.agent;
+    let (chat_id, session, live_in, game, earlier) = {
+        let chat = state.chat.lock().unwrap();
+        // The last two messages are this turn's question and answer.
+        let earlier = chat.messages.len() > 2;
+        (chat.id.clone(), chat.session_id.clone(), chat.session_generation, chat.game.clone(), earlier)
+    };
+    let cwd = profile_dir(state);
+    let prompt = system_prompt(game.as_ref());
+    let session = match session {
+        Some(id) if live_in == Some(agent.generation()) => Session { id, needs_history: false },
+        Some(id) => {
+            let started = Instant::now();
+            match agent.restore_session(id.clone(), cwd.clone(), prompt.clone()).await {
+                Ok(()) => {
+                    info!("agent session {id} restored in {} ms", started.elapsed().as_millis());
+                    Session { id, needs_history: false }
+                }
+                Err(e) => {
+                    warn!("agent session {id} can't be restored ({e}); a new one gets the chat so far");
+                    Session { id: agent.new_session(cwd, prompt).await?, needs_history: earlier }
+                }
+            }
+        }
+        None => Session { id: agent.new_session(cwd, prompt).await?, needs_history: earlier },
+    };
+    let mut chat = state.chat.lock().unwrap();
+    if chat.epoch != epoch {
+        return Err("чат закрыт".to_string());
+    }
+    if chat.session_id.as_deref() != Some(&session.id) {
+        debug!("chat {chat_id}: agent session {}", session.id);
+        state.history.set_session(&chat_id, agent.spec.id, &session.id);
+    }
+    chat.session_id = Some(session.id.clone());
+    chat.session_generation = Some(agent.generation());
+    Ok(session)
+}
+
+/// Total size of the earlier conversation given to a new session (newest messages kept).
+const HISTORY_CHARS: usize = 12_000;
+/// Per message: long answers are cut.
+const MESSAGE_CHARS: usize = 1_500;
+
+/// The chat before this turn as text, for a new agent session of an existing chat.
+fn conversation_so_far(state: &AppState, epoch: u64) -> Option<String> {
+    let chat = state.chat.lock().unwrap();
+    if chat.epoch != epoch {
+        return None;
+    }
+    let earlier = &chat.messages[..chat.messages.len().saturating_sub(2)];
+    let text = transcript(earlier, HISTORY_CHARS);
+    (!text.is_empty()).then(|| {
+        format!(
+            "(This chat continues an earlier conversation that you no longer have in context. \
+             Here it is, for reference; frames of the game that were attached are not included.)\n\n\
+             {text}\n\n(End of the earlier conversation. The user's new message follows.)"
+        )
+    })
+}
+
+/// "User: …" / "Assistant: …" lines of the messages' text, the newest that fit in `budget`.
+fn transcript(messages: &[ChatMessage], budget: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0;
+    for m in messages.iter().rev() {
+        let text: String = m
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("")
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let text = match text.char_indices().nth(MESSAGE_CHARS) {
+            Some((i, _)) => format!("{}…", &text[..i]),
+            None => text,
+        };
+        let who = match m.role {
+            Role::User => "User",
+            Role::Assistant => "Assistant",
+        };
+        let line = format!("{who}: {text}");
+        used += line.chars().count();
+        if used > budget && !lines.is_empty() {
+            break;
+        }
+        lines.push(line);
+    }
+    lines.reverse();
+    lines.join("\n\n")
+}
+
+/// Captures and encodes the game frame for the user's message and shows it on the message.
+/// Returns the prompt block: the image, or a note for the model that capturing failed.
+async fn attach_frame(state: &Arc<AppState>, chat_id: &str, epoch: u64, user_id: &str) -> Option<PromptBlock> {
+    let result = match shots::for_message(state).await {
+        Ok(frame) => shots::store(state, chat_id, frame).await,
+        Err(e) => Err(e),
+    };
+    let mut chat = state.chat.lock().unwrap();
+    if chat.epoch != epoch {
+        return None;
+    }
+    let message = chat.message_mut(user_id)?;
+    let block = match result {
+        Ok(stored) => {
+            message.screenshot = Some(stored.shot);
+            PromptBlock::Image { base64: stored.base64, mime: stored.mime.into() }
+        }
+        Err(reason) => {
+            warn!("no frame for the message: {reason}");
+            message.error = Some(format!("Кадр игры не приложен: {reason}"));
+            PromptBlock::Text(format!(
+                "(The user wanted to attach a frame of the game, but capturing it failed: {reason}.)"
+            ))
+        }
+    };
+    let message = message.clone();
+    chat.save(state, user_id);
+    state.hub.send(Target::All, ServerMsg::ChatMessage { message });
+    Some(block)
+}
+
+/// The agent's screenshot tool took a frame: show it on that tool call in the answer.
+pub fn attach_tool_shot(state: &AppState, shot: Shot) {
+    let mut chat = state.chat.lock().unwrap();
+    let Some(active) = chat.active.clone() else { return };
+    let Some(message) = chat.message_mut(&active) else { return };
+    let waiting = message.parts.iter_mut().rev().find_map(|p| match p {
+        Part::Tool { tool } if tool.title == SCREENSHOT_TOOL && tool.shot.is_none() => Some(tool),
+        _ => None,
+    });
+    match waiting {
+        Some(tool) => {
+            tool.shot = Some(shot);
+            let tool = tool.clone();
+            chat.save(state, &active);
+            state.hub.send(Target::All, ServerMsg::ChatTool { message_id: active, tool });
+        }
+        None => chat.pending_tool_shot = Some(shot), // its tool call hasn't arrived yet
+    }
+}
+
+fn humanize_error(e: &str, login_hint: &str) -> String {
+    let lower = e.to_lowercase();
+    if ["login", "auth", "credential", "401", "unauthorized", "api key"].iter().any(|k| lower.contains(k)) {
+        format!("{e}\n\n{login_hint}")
+    } else if lower.contains("rate limit") || lower.contains("usage limit") || lower.contains("429") {
+        format!("Исчерпан лимит подписки, попробуйте позже.\n\n{e}")
+    } else if ["econnrefused", "etimedout", "enotfound", "econnreset", "fetch failed", "connection error", "network"]
+        .iter()
+        .any(|k| lower.contains(k))
+    {
+        format!(
+            "Нет связи с серверами модели. Проверьте интернет или прокси: по умолчанию берётся системный \
+             прокси Windows, свой можно задать в config.toml, раздел [network].\n\n{e}"
+        )
+    } else {
+        e.to_string()
+    }
+}
+
+fn system_prompt(game: Option<&GameInfo>) -> String {
+    let mut p = String::from(
+        "You are an AI assistant inside an overlay on top of a video game. The user is playing right now \
+         and reads your answers between actions.\n\
+         - Lead with the answer. Be brief and concrete; use short numbered steps for instructions.\n\
+         - Reply in the language the user writes in.\n\
+         - For game facts you are not sure about (items, quests, bosses, builds, patch changes), use web search \
+           and mention the source briefly. Don't invent details.\n\
+         - Format with Markdown; keep answers short enough to read in a few seconds unless asked for detail.\n\
+         - An image attached to the user's message is a frame of the game window captured when they asked; \
+           \"this\" or \"here\" usually refers to it (the mouse cursor may point at the thing).\n\
+         - The `screenshot_game` tool captures the current frame. Call it when the question depends on what is on \
+           screen and no frame is attached, or the attached one may be outdated; not for general questions.\n",
+    );
+    match game {
+        Some(g) if !g.title.is_empty() || !g.exe.is_empty() => p.push_str(&format!(
+            "- The game window is \"{}\" (process {}). Unless the user names another game, questions are about \
+             this game. The window title may be generic: infer the game from it and the process name.\n",
+            g.title, g.exe
+        )),
+        _ => p.push_str("- The game is unknown; ask which game if it matters.\n"),
+    }
+    p
+}
+
+// ------------------------------------------------------------------ agent events
+
+fn refresh_tray(state: &AppState) {
+    if let Some(app) = state.app.get() {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || crate::tray::refresh_tooltip(&handle));
+    }
+}
+
+pub fn spawn_event_loop(state: Arc<AppState>, mut events: mpsc::UnboundedReceiver<AgentEvent>) {
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            handle_event(&state, event);
+        }
+    });
+}
+
+fn handle_event(state: &Arc<AppState>, event: AgentEvent) {
+    match event {
+        AgentEvent::Status(status) => {
+            debug!("agent status: {:?} {:?}", status.state, status.detail);
+            *state.agent_status.lock().unwrap() = status.clone();
+            state.hub.send(Target::All, ServerMsg::AgentStatus { status });
+            refresh_tray(state);
+        }
+        AgentEvent::Usage(usage) => {
+            let changed = state.usage.lock().unwrap().replace(usage.clone()).as_ref() != Some(&usage);
+            if changed {
+                state.hub.send(Target::All, ServerMsg::AgentUsage { usage });
+                refresh_tray(state);
+            }
+        }
+        AgentEvent::PermissionRequested { session_id, prompt } => {
+            let mut chat = state.chat.lock().unwrap();
+            if chat.session_id.as_deref() == Some(&session_id) {
+                chat.permissions.push(prompt);
+                state.hub.send(Target::All, ServerMsg::Permissions { prompts: chat.permissions.clone() });
+            } else {
+                drop(chat);
+                state.agent.respond_permission(&prompt.id, None); // stale session
+            }
+        }
+        AgentEvent::PermissionClosed { id } => {
+            let mut chat = state.chat.lock().unwrap();
+            let before = chat.permissions.len();
+            chat.permissions.retain(|p| p.id != id);
+            if chat.permissions.len() != before {
+                state.hub.send(Target::All, ServerMsg::Permissions { prompts: chat.permissions.clone() });
+            }
+        }
+        AgentEvent::Update { session_id, update } => {
+            let mut chat = state.chat.lock().unwrap();
+            if chat.session_id.as_deref() != Some(&session_id) {
+                return;
+            }
+            if let Update::Title(title) = update {
+                if chat.title.as_deref() == Some(&title) {
+                    return;
+                }
+                chat.title = Some(title.clone());
+                let chat_id = chat.id.clone();
+                if chat.saved {
+                    state.history.set_title(&chat_id, &title);
+                }
+                drop(chat);
+                state.hub.send(Target::All, ServerMsg::ChatTitle { title });
+                broadcast_summary(state, &chat_id);
+                return;
+            }
+            let Some(active) = chat.active.clone() else { return };
+            let pending_shot = chat.pending_tool_shot.take();
+            let Some(message) = chat.message_mut(&active) else { return };
+            let mut out = match update {
+                Update::Text(text) => {
+                    message.append(AppendKind::Text, &text);
+                    ServerMsg::ChatAppend { message_id: active.clone(), kind: AppendKind::Text, text }
+                }
+                Update::Thought(text) => {
+                    message.append(AppendKind::Thought, &text);
+                    ServerMsg::ChatAppend { message_id: active.clone(), kind: AppendKind::Thought, text }
+                }
+                Update::Tool(tool) => {
+                    let tool = message.upsert_tool(tool);
+                    ServerMsg::ChatTool { message_id: active.clone(), tool }
+                }
+                Update::ToolPatch { id, title, kind, status } => {
+                    let mut tool = message
+                        .parts
+                        .iter()
+                        .find_map(|p| match p {
+                            Part::Tool { tool } if tool.id == id => Some(tool.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or(ToolInfo {
+                            id,
+                            title: String::new(),
+                            kind: "other".into(),
+                            status: ToolStatus::Pending,
+                            shot: None,
+                        });
+                    if let Some(t) = title {
+                        tool.title = t;
+                    }
+                    if let Some(k) = kind {
+                        tool.kind = k;
+                    }
+                    if let Some(s) = status {
+                        tool.status = s;
+                    }
+                    let tool = message.upsert_tool(tool);
+                    ServerMsg::ChatTool { message_id: active.clone(), tool }
+                }
+                Update::Title(_) => unreachable!(),
+            };
+            // A frame the screenshot tool took before its tool call showed up.
+            if let Some(shot) = pending_shot {
+                match &mut out {
+                    ServerMsg::ChatTool { tool, .. } if tool.title == SCREENSHOT_TOOL && tool.shot.is_none() => {
+                        tool.shot = Some(shot);
+                        message.upsert_tool(tool.clone());
+                    }
+                    _ => chat.pending_tool_shot = Some(shot),
+                }
+            }
+            if chat.flushed.elapsed() >= FLUSH_EVERY {
+                chat.save(state, &active);
+                chat.flushed = Instant::now();
+            }
+            state.hub.send(Target::All, out);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(role: Role, parts: Vec<Part>) -> ChatMessage {
+        ChatMessage { id: new_id(), role, parts, screenshot: None, status: MessageStatus::Done, error: None }
+    }
+
+    fn text(t: &str) -> Part {
+        Part::Text { text: t.into() }
+    }
+
+    #[test]
+    fn transcript_keeps_text_and_the_newest_messages() {
+        let messages = vec![
+            msg(Role::User, vec![text("first question")]),
+            msg(Role::Assistant, vec![Part::Thought { text: "hidden".into() }, text("first "), text("answer")]),
+            msg(Role::User, vec![text("second question")]),
+            msg(Role::Assistant, vec![]), // cancelled before any text
+        ];
+        assert_eq!(
+            transcript(&messages, 10_000),
+            "User: first question\n\nAssistant: first answer\n\nUser: second question"
+        );
+        // Over the budget: the oldest messages go first, the newest one is always kept.
+        assert_eq!(transcript(&messages, 30), "User: second question");
+        assert_eq!(transcript(&messages, 1), "User: second question");
+        let long = msg(Role::Assistant, vec![text(&"я".repeat(MESSAGE_CHARS + 50))]);
+        let t = transcript(&[long], 100_000);
+        assert!(t.ends_with('…') && t.chars().count() == "Assistant: ".len() + MESSAGE_CHARS + 1);
+    }
+
+    #[test]
+    fn stored_chat_keeps_its_session_only_for_the_same_agent() {
+        let stored = |agent: &str| StoredChat {
+            id: "c".into(),
+            game: None,
+            title: Some("t".into()),
+            agent: agent.into(),
+            session_id: Some("s".into()),
+            messages: vec![ChatMessage { status: MessageStatus::Streaming, ..msg(Role::Assistant, vec![text("ha")]) }],
+        };
+        let chat = ChatState::from_stored(stored("claude"), "claude");
+        assert_eq!(chat.session_id.as_deref(), Some("s"));
+        assert_eq!(chat.session_generation, None, "restored before the first prompt");
+        assert_eq!(chat.messages[0].status, MessageStatus::Cancelled, "interrupted answers don't stay streaming");
+        assert!(chat.saved);
+        assert_eq!(ChatState::from_stored(stored("codex"), "claude").session_id, None);
+    }
+}
