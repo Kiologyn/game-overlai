@@ -124,23 +124,31 @@ async fn lan_guard(State(ctx): State<Ctx>, req: Request, next: Next) -> Response
         return StatusCode::FORBIDDEN.into_response();
     }
     let lan = &ctx.state.lan;
-    if let Some(token) = query_param(req.uri().query().unwrap_or(""), "t") {
+    let path = req.uri().path().to_string();
+    let reason = if let Some(token) = query_param(req.uri().query().unwrap_or(""), "t") {
         if lan.token_ok(token) {
-            info!("LAN: device {peer} signed in");
-            let cookie = format!(
-                "{}={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict",
-                crate::lan::COOKIE
-            );
+            let agent = header_value(&req, header::USER_AGENT).unwrap_or_default();
+            info!("LAN: device {peer} signed in ({agent})");
+            // Lax, not Strict: a QR scanner (e.g. Yandex) opens the link from its own site, and
+            // Chromium then doesn't send a Strict cookie on the redirect to "/" (the device got
+            // "no access" right after signing in). Other sites still can't use it: they would
+            // need a WebSocket or a fetch, and those carry their Origin, refused above.
+            let cookie = format!("{}={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax", crate::lan::COOKIE);
             let mut res = Redirect::to("/").into_response();
             if let Ok(v) = HeaderValue::from_str(&cookie) {
                 res.headers_mut().insert(header::SET_COOKIE, v);
             }
             return res;
         }
-        warn!("LAN: device {peer} came with an outdated link");
-    } else if cookie(&req, crate::lan::COOKIE).is_some_and(|t| lan.token_ok(t)) {
-        return next.run(req).await;
-    }
+        "an outdated link"
+    } else {
+        match cookie(&req, crate::lan::COOKIE) {
+            Some(t) if lan.token_ok(t) => return next.run(req).await,
+            Some(_) => "an outdated cookie (access was reset)",
+            None => "no cookie",
+        }
+    };
+    warn!("LAN: {path} from {peer}: no access, {reason}");
     (StatusCode::UNAUTHORIZED, Html(NO_ACCESS)).into_response()
 }
 
@@ -148,8 +156,10 @@ const NO_ACCESS: &str = r#"<!doctype html><html lang="ru"><head><meta charset="u
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>game-overlai</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e0e0e;color:#ececec;
 font:15px/1.5 system-ui,sans-serif}main{max-width:340px;padding:24px}h1{font-size:18px;margin:0 0 8px}
-p{color:#8b8b8b;margin:0}</style></head><body><main><h1>Нет доступа</h1>
-<p>Откройте на ПК в трее game-overlai «Телефон: QR-код» и отсканируйте код заново.</p></main></body></html>"#;
+p{color:#8b8b8b;margin:0 0 8px}</style></head><body><main><h1>Нет доступа</h1>
+<p>Откройте на ПК в трее game-overlai «Телефон: QR-код» и отсканируйте код заново.</p>
+<p>Если после этого снова «Нет доступа», проверьте, что браузер на телефоне не блокирует cookie.</p>
+</main></body></html>"#;
 
 fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
     query.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
