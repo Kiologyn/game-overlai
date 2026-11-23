@@ -1,0 +1,428 @@
+//! Chat history on disk, in %LOCALAPPDATA%\game-overlai\ (machine-local: frames are big and
+//! shouldn't roam with the user profile):
+//!
+//!   history.db                   SQLite: games, chats, messages, frames
+//!   shots\<chat id>\<shot id>.jpg  game frames of a chat (deleted with the chat)
+//!
+//! A chat is saved with its first message; an empty new chat exists only in memory.
+//! Write errors are logged and don't stop the chat: the history is a convenience.
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rusqlite::{Connection, OptionalExtension, params};
+use tracing::{info, warn};
+
+use crate::protocol::{ChatMessage, ChatSummary, GameInfo, Shot};
+
+/// Bumped with every schema change; `migrate` brings older files up to date.
+const SCHEMA_VERSION: i32 = 1;
+
+const SCHEMA_V1: &str = "
+CREATE TABLE games (
+    exe        TEXT PRIMARY KEY COLLATE NOCASE,  -- process name, e.g. cs2.exe
+    title      TEXT NOT NULL,                    -- latest window title
+    last_seen  INTEGER NOT NULL                  -- unix ms
+);
+CREATE TABLE chats (
+    id          TEXT PRIMARY KEY,
+    game_exe    TEXT COLLATE NOCASE REFERENCES games(exe),
+    game_title  TEXT,             -- window title when the chat started (also when the exe is unknown)
+    agent       TEXT NOT NULL,    -- agent id, e.g. claude
+    session_id  TEXT,             -- the agent's session, resumed after a restart
+    title       TEXT,             -- given by the agent
+    preview     TEXT NOT NULL,    -- start of the first question (title until the agent gives one)
+    created_at  INTEGER NOT NULL, -- unix ms
+    updated_at  INTEGER NOT NULL  -- unix ms of the last question
+);
+CREATE INDEX chats_by_time ON chats(updated_at DESC);
+CREATE INDEX chats_by_game ON chats(game_exe, updated_at DESC);
+CREATE TABLE messages (
+    id       TEXT PRIMARY KEY,
+    chat_id  TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    seq      INTEGER NOT NULL,    -- position in the chat
+    body     TEXT NOT NULL        -- protocol::ChatMessage as JSON
+);
+CREATE INDEX messages_by_chat ON messages(chat_id, seq);
+CREATE TABLE shots (
+    id          TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    mime        TEXT NOT NULL,
+    width       INTEGER NOT NULL,
+    height      INTEGER NOT NULL,
+    bytes       INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX shots_by_chat ON shots(chat_id);
+";
+
+pub fn now_ms() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// A chat as stored, to make it the current one again.
+#[derive(Debug)]
+pub struct StoredChat {
+    pub id: String,
+    pub game: Option<GameInfo>,
+    pub title: Option<String>,
+    pub agent: String,
+    pub session_id: Option<String>,
+    pub messages: Vec<ChatMessage>,
+}
+
+pub struct History {
+    db: Mutex<Connection>,
+    shots_dir: PathBuf,
+}
+
+impl History {
+    /// Opens (or creates) the history in `dir`. A file that can't be opened is moved aside and
+    /// a new one started; if even that fails, the history lives in memory for this run.
+    pub fn open(dir: &Path) -> Self {
+        let shots_dir = dir.join("shots");
+        let file = dir.join("history.db");
+        let db = match open_file(&file) {
+            Ok(db) => db,
+            Err(e) => {
+                let aside = dir.join(format!("history.broken-{}.db", now_ms()));
+                warn!("history {} can't be opened ({e}); moved to {}", file.display(), aside.display());
+                let _ = std::fs::rename(&file, &aside);
+                open_file(&file).unwrap_or_else(|e| {
+                    warn!("history: {e}; keeping it in memory for this run");
+                    let db = Connection::open_in_memory().expect("in-memory SQLite");
+                    migrate(&db).expect("schema in memory");
+                    db
+                })
+            }
+        };
+        Self { db: Mutex::new(db), shots_dir }
+    }
+
+    #[cfg(test)]
+    fn in_memory(shots_dir: PathBuf) -> Self {
+        let db = Connection::open_in_memory().unwrap();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        migrate(&db).unwrap();
+        Self { db: Mutex::new(db), shots_dir }
+    }
+
+    fn write(&self, what: &str, f: impl FnOnce(&Connection) -> rusqlite::Result<()>) {
+        if let Err(e) = f(&self.db.lock().unwrap()) {
+            warn!("history: {what}: {e}");
+        }
+    }
+
+    fn read<T: Default>(&self, what: &str, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> T {
+        f(&self.db.lock().unwrap()).unwrap_or_else(|e| {
+            warn!("history: {what}: {e}");
+            T::default()
+        })
+    }
+
+    /// Saves a new chat (with its first question as the preview).
+    pub fn create_chat(&self, id: &str, game: Option<&GameInfo>, agent: &str, preview: &str, now: i64) {
+        self.write("create chat", |db| {
+            let exe = game.map(|g| g.exe.as_str()).filter(|e| !e.is_empty());
+            if let (Some(exe), Some(g)) = (exe, game) {
+                db.execute(
+                    "INSERT INTO games (exe, title, last_seen) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (exe) DO UPDATE SET
+                         title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE games.title END,
+                         last_seen = excluded.last_seen",
+                    params![exe, g.title, now],
+                )?;
+            }
+            db.execute(
+                "INSERT INTO chats (id, game_exe, game_title, agent, preview, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                params![id, exe, game.map(|g| g.title.as_str()), agent, preview_of(preview), now],
+            )?;
+            Ok(())
+        });
+    }
+
+    pub fn save_message(&self, chat_id: &str, seq: usize, message: &ChatMessage) {
+        let Ok(body) = serde_json::to_string(message) else { return };
+        self.write("save message", |db| {
+            db.execute(
+                "INSERT INTO messages (id, chat_id, seq, body) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, body = excluded.body",
+                params![message.id, chat_id, seq as i64, body],
+            )
+            .map(drop)
+        });
+    }
+
+    /// The chat got a new question: it moves to the top of the list.
+    pub fn touch(&self, chat_id: &str, now: i64) {
+        self.write("touch chat", |db| {
+            db.execute("UPDATE chats SET updated_at = ?2 WHERE id = ?1", params![chat_id, now]).map(drop)
+        });
+    }
+
+    pub fn set_title(&self, chat_id: &str, title: &str) {
+        self.write("set title", |db| {
+            db.execute("UPDATE chats SET title = ?2 WHERE id = ?1", params![chat_id, title]).map(drop)
+        });
+    }
+
+    pub fn set_session(&self, chat_id: &str, agent: &str, session_id: &str) {
+        self.write("set session", |db| {
+            db.execute("UPDATE chats SET agent = ?2, session_id = ?3 WHERE id = ?1", params![chat_id, agent, session_id])
+                .map(drop)
+        });
+    }
+
+    /// All chats, newest first.
+    pub fn list(&self) -> Vec<ChatSummary> {
+        self.read("list chats", |db| {
+            let mut q = db.prepare(&format!("{SUMMARY} ORDER BY c.updated_at DESC"))?;
+            q.query_map([], summary_row)?.collect()
+        })
+    }
+
+    pub fn summary(&self, id: &str) -> Option<ChatSummary> {
+        self.read("chat summary", |db| {
+            db.query_row(&format!("{SUMMARY} WHERE c.id = ?1"), [id], summary_row).optional()
+        })
+    }
+
+    pub fn load(&self, id: &str) -> Option<StoredChat> {
+        self.read("load chat", |db| {
+            let Some(mut chat) = db
+                .query_row(
+                    "SELECT c.id, c.game_exe, COALESCE(g.title, c.game_title), c.agent, c.session_id, c.title
+                     FROM chats c LEFT JOIN games g ON g.exe = c.game_exe WHERE c.id = ?1",
+                    [id],
+                    |r| {
+                        Ok(StoredChat {
+                            id: r.get(0)?,
+                            game: game_of(r.get(1)?, r.get(2)?),
+                            agent: r.get(3)?,
+                            session_id: r.get(4)?,
+                            title: r.get(5)?,
+                            messages: vec![],
+                        })
+                    },
+                )
+                .optional()?
+            else {
+                return Ok(None);
+            };
+            let mut q = db.prepare("SELECT body FROM messages WHERE chat_id = ?1 ORDER BY seq")?;
+            let bodies = q.query_map([id], |r| r.get::<_, String>(0))?;
+            for body in bodies {
+                match serde_json::from_str::<ChatMessage>(&body?) {
+                    Ok(m) => chat.messages.push(m),
+                    Err(e) => warn!("history: chat {id}: unreadable message skipped: {e}"),
+                }
+            }
+            Ok(Some(chat))
+        })
+    }
+
+    /// The chat the user had last (the one to show after a restart).
+    pub fn latest(&self) -> Option<String> {
+        self.read("latest chat", |db| {
+            db.query_row("SELECT id FROM chats ORDER BY updated_at DESC LIMIT 1", [], |r| r.get(0)).optional()
+        })
+    }
+
+    pub fn latest_for_game(&self, exe: &str) -> Option<String> {
+        self.read("latest chat of a game", |db| {
+            db.query_row(
+                "SELECT id FROM chats WHERE game_exe = ?1 ORDER BY updated_at DESC LIMIT 1",
+                [exe],
+                |r| r.get(0),
+            )
+            .optional()
+        })
+    }
+
+    /// Deletes the chat, its messages and its frames. Returns whether it existed.
+    pub fn delete(&self, id: &str) -> bool {
+        let deleted = self.read("delete chat", |db| db.execute("DELETE FROM chats WHERE id = ?1", [id]));
+        match std::fs::remove_dir_all(self.chat_shots_dir(id)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => warn!("history: frames of chat {id} not deleted: {e}"),
+        }
+        deleted > 0
+    }
+
+    fn chat_shots_dir(&self, chat_id: &str) -> PathBuf {
+        // Ids are our own uuids; refuse anything that could leave the directory.
+        let safe: String = chat_id.chars().filter(char::is_ascii_alphanumeric).collect();
+        self.shots_dir.join(safe)
+    }
+
+    /// Where a frame's file goes (the directory is created).
+    pub fn shot_path(&self, chat_id: &str, shot_id: &str, mime: &str) -> PathBuf {
+        let dir = self.chat_shots_dir(chat_id);
+        let _ = std::fs::create_dir_all(&dir);
+        let ext = if mime == "image/png" { "png" } else { "jpg" };
+        let safe: String = shot_id.chars().filter(char::is_ascii_alphanumeric).collect();
+        dir.join(format!("{safe}.{ext}"))
+    }
+
+    /// Records a frame whose file was written to `shot_path`. False if it can't be recorded
+    /// (e.g. the chat was deleted meanwhile): the caller removes the file.
+    pub fn add_shot(&self, chat_id: &str, shot: &Shot, mime: &str, bytes: usize) -> bool {
+        let rows = self.read("add frame", |db| {
+            db.execute(
+                "INSERT INTO shots (id, chat_id, mime, width, height, bytes, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![shot.id, chat_id, mime, shot.width, shot.height, bytes as i64, now_ms()],
+            )
+        });
+        rows == 1
+    }
+
+    /// File and MIME type of a frame.
+    pub fn shot_file(&self, id: &str) -> Option<(PathBuf, String)> {
+        let row: Option<(String, String)> = self.read("find frame", |db| {
+            db.query_row("SELECT chat_id, mime FROM shots WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()
+        });
+        row.map(|(chat_id, mime)| {
+            let ext = if mime == "image/png" { "png" } else { "jpg" };
+            let safe: String = id.chars().filter(char::is_ascii_alphanumeric).collect();
+            (self.chat_shots_dir(&chat_id).join(format!("{safe}.{ext}")), mime)
+        })
+    }
+}
+
+const SUMMARY: &str = "SELECT c.id, COALESCE(c.title, c.preview), c.game_exe, COALESCE(g.title, c.game_title), c.updated_at
+                       FROM chats c LEFT JOIN games g ON g.exe = c.game_exe";
+
+fn summary_row(r: &rusqlite::Row) -> rusqlite::Result<ChatSummary> {
+    Ok(ChatSummary { id: r.get(0)?, title: r.get(1)?, game: game_of(r.get(2)?, r.get(3)?), updated_at: r.get(4)? })
+}
+
+fn game_of(exe: Option<String>, title: Option<String>) -> Option<GameInfo> {
+    match (exe, title) {
+        (None, None) => None,
+        (exe, title) => Some(GameInfo { title: title.unwrap_or_default(), exe: exe.unwrap_or_default() }),
+    }
+}
+
+/// First line of the question, at most ~80 characters.
+fn preview_of(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    match line.char_indices().nth(80) {
+        Some((i, _)) => format!("{}…", line[..i].trim_end()),
+        None => line.to_string(),
+    }
+}
+
+fn open_file(file: &Path) -> rusqlite::Result<Connection> {
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let db = Connection::open(file)?;
+    db.pragma_update(None, "journal_mode", "WAL")?;
+    db.pragma_update(None, "synchronous", "NORMAL")?;
+    db.pragma_update(None, "foreign_keys", true)?;
+    db.busy_timeout(std::time::Duration::from_secs(2))?;
+    migrate(&db)?;
+    let chats: i64 = db.query_row("SELECT COUNT(*) FROM chats", [], |r| r.get(0))?;
+    info!("history: {} ({chats} chats)", file.display());
+    Ok(db)
+}
+
+fn migrate(db: &Connection) -> rusqlite::Result<()> {
+    let version: i32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if version > SCHEMA_VERSION {
+        warn!("history was written by a newer version (schema {version}); using it as is");
+        return Ok(());
+    }
+    if version < 1 {
+        db.execute_batch(&format!("BEGIN; {SCHEMA_V1} PRAGMA user_version = 1; COMMIT;"))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{MessageStatus, Part, Role};
+
+    fn message(id: &str, text: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.into(),
+            role: Role::User,
+            parts: vec![Part::Text { text: text.into() }],
+            screenshot: None,
+            status: MessageStatus::Done,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn chats_roundtrip() {
+        let tmp = std::env::temp_dir().join(format!("overlai-history-{}", uuid::Uuid::new_v4().simple()));
+        let h = History::in_memory(tmp.join("shots"));
+        let cs2 = GameInfo { title: "Counter-Strike 2".into(), exe: "cs2.exe".into() };
+        h.create_chat("a", Some(&cs2), "claude", "  \n как раскидать смоки на мираже?\nвторая строка", 1000);
+        h.save_message("a", 0, &message("m1", "как раскидать смоки на мираже?"));
+        h.save_message("a", 1, &message("m2", "ответ"));
+        h.save_message("a", 1, &message("m2", "ответ, исправленный")); // a new version replaces it
+        h.create_chat("b", None, "claude", "просто вопрос", 2000);
+
+        let list = h.list();
+        assert_eq!(list.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert_eq!(list[1].title, "как раскидать смоки на мираже?");
+        assert_eq!(list[1].game, Some(cs2.clone()));
+        assert_eq!(list[0].game, None);
+
+        h.touch("a", 3000);
+        h.set_title("a", "Смоки на Mirage");
+        h.set_session("a", "claude", "sess-1");
+        assert_eq!(h.latest().as_deref(), Some("a"));
+        assert_eq!(h.latest_for_game("CS2.EXE").as_deref(), Some("a")); // exe matches without case
+        assert_eq!(h.latest_for_game("dota2.exe"), None);
+        assert_eq!(h.summary("a").unwrap().title, "Смоки на Mirage");
+
+        // The latest window title of a game is shown for all its chats.
+        let renamed = GameInfo { title: "Counter-Strike 2 (beta)".into(), exe: "cs2.exe".into() };
+        h.create_chat("c", Some(&renamed), "claude", "ещё", 4000);
+        assert_eq!(h.summary("a").unwrap().game.unwrap().title, "Counter-Strike 2 (beta)");
+
+        let chat = h.load("a").unwrap();
+        assert_eq!(chat.session_id.as_deref(), Some("sess-1"));
+        assert_eq!(chat.messages.len(), 2);
+        assert_eq!(chat.messages[1].parts, vec![Part::Text { text: "ответ, исправленный".into() }]);
+
+        let shot = Shot { id: "s1".into(), width: 4, height: 2 };
+        let path = h.shot_path("a", &shot.id, "image/jpeg");
+        std::fs::write(&path, b"jpeg").unwrap();
+        assert!(h.add_shot("a", &shot, "image/jpeg", 4));
+        assert!(!h.add_shot("gone", &Shot { id: "s2".into(), ..shot.clone() }, "image/jpeg", 4), "no such chat");
+        assert_eq!(h.shot_file("s1"), Some((path.clone(), "image/jpeg".to_string())));
+
+        assert!(h.delete("a"));
+        assert!(h.load("a").is_none());
+        assert!(h.shot_file("s1").is_none());
+        assert!(!path.exists(), "frames are deleted with the chat");
+        assert!(!h.delete("a"));
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn previews() {
+        assert_eq!(preview_of("короткий"), "короткий");
+        let long = "слово ".repeat(30);
+        let p = preview_of(&long);
+        assert!(p.ends_with('…') && p.chars().count() <= 81, "{p}");
+    }
+
+    #[test]
+    fn reopening_a_file_keeps_chats() {
+        let dir = std::env::temp_dir().join(format!("overlai-history-{}", uuid::Uuid::new_v4().simple()));
+        History::open(&dir).create_chat("a", None, "claude", "вопрос", 1);
+        assert_eq!(History::open(&dir).list().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
