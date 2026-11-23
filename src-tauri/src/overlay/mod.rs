@@ -122,6 +122,33 @@ pub fn on_hotkey(app: &AppHandle, mode: PanelMode) {
     }
 }
 
+/// A question from a phone: the game is the window in the foreground on the PC right now (the
+/// panel may never have been opened over it). Our own windows and the desktop keep the game
+/// known so far.
+pub fn adopt_foreground_game(st: &AppState) {
+    let fg = win32::foreground();
+    if !win32::is_alive(fg) || win32::is_shell_window(fg) {
+        return;
+    }
+    let exe = win32::process_exe(fg).unwrap_or_default();
+    let own = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .is_some_and(|me| me.eq_ignore_ascii_case(&exe));
+    if own {
+        return;
+    }
+    let mut ov = st.overlay.lock().unwrap();
+    if ov.game_hwnd == win32::raw(fg) {
+        return;
+    }
+    let game = GameInfo { title: win32::window_title(fg), exe };
+    debug!("question from a device on the network: game is {game:?}");
+    ov.game_hwnd = win32::raw(fg);
+    ov.game = Some(game);
+    ov.prefetch = None;
+}
+
 pub fn show(app: &AppHandle, mode: PanelMode, source: ShowSource) {
     let Some(w) = panel(app) else { return };
     let st = state(app);

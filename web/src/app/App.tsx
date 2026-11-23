@@ -2,7 +2,7 @@
 // `?game=<exe>` opens that game's page (profile + chats) instead of the chat.
 
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquare, Plus, Search, Settings2, Trash2 } from "lucide-react";
+import { Menu, MessageSquare, Plus, Search, Settings2, Trash2 } from "lucide-react";
 import { isBusy, type Connection } from "../api/connection";
 import { blankProfile, findProfile, gameLabel, sameExe } from "../api/games";
 import { useStoredFlag, useUiState } from "../api/hooks";
@@ -25,12 +25,15 @@ export function App({ conn }: { conn: Connection }) {
   const [shotOverride, setShotOverride] = useState<boolean | null>(null);
   /** Exe of the game whose page is open; null = the chat. */
   const [gameExe, setGameExe] = useState<string | null>(gameInUrl);
+  /** Narrow screens (phone): the chat list slides in over the chat. */
+  const [navOpen, setNavOpen] = useState(false);
   const busy = isBusy(ui);
   const chatGroups = useMemo(() => groupChats(ui.chats, query, ui.games), [query, ui.chats, ui.games]);
 
   // The URL follows the page (reload keeps it); back/forward switch it.
   const showGame = (exe: string | null) => {
     setGameExe(exe);
+    setNavOpen(false);
     const url = exe ? `?game=${encodeURIComponent(exe)}` : location.pathname;
     if (gameInUrl() !== exe) history.pushState(null, "", url);
   };
@@ -65,6 +68,15 @@ export function App({ conn }: { conn: Connection }) {
     <ShotViewerProvider>
       <div className="page">
         <header className="topbar">
+          <button
+            type="button"
+            className="icon-btn nav-toggle"
+            onClick={() => setNavOpen((open) => !open)}
+            aria-label="Список чатов"
+            aria-expanded={navOpen}
+          >
+            <Menu size={18} />
+          </button>
           <AgentDot agent={ui.agent} />
           <span className="brand">game-overlai</span>
           <span className="topbar-title">
@@ -87,7 +99,8 @@ export function App({ conn }: { conn: Connection }) {
           </span>
         </header>
         <div className="browser-workspace">
-          <aside className="history-sidebar" aria-label="История чатов">
+          {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
+          <aside className={`history-sidebar${navOpen ? " open" : ""}`} aria-label="История чатов">
             <div className="history-heading">
               <span>История</span>
             </div>

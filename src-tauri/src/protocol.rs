@@ -254,6 +254,37 @@ pub struct PermissionPrompt {
     pub options: Vec<PermissionOption>,
 }
 
+// ------------------------------------------------------------------ phone (LAN)
+
+/// One address of this PC on the local network, with the sign-in link for a phone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LanAddress {
+    /// Network adapter, e.g. "Wi-Fi".
+    pub adapter: String,
+    /// Link with the access token (opens the chat and signs the phone in).
+    pub url: String,
+    /// QR code of `url` (SVG markup made by the core).
+    pub qr_svg: String,
+}
+
+/// Access to the chat from other devices on the local network (sent to this PC's UI only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LanStatus {
+    /// Turned on by the user (stays on after a restart).
+    pub enabled: bool,
+    /// Port the LAN server listens on; `null` while it is off or failed to start.
+    pub port: Option<u16>,
+    /// Best address first.
+    pub addresses: Vec<LanAddress>,
+    /// Devices connected right now.
+    pub clients: u32,
+    pub error: Option<String>,
+}
+
 // ------------------------------------------------------------------ messages
 
 /// UI -> core.
@@ -304,6 +335,12 @@ pub enum ClientMsg {
     /// `optionId: null` = dismiss (the agent treats it as cancelled).
     #[serde(rename = "permission.respond", rename_all = "camelCase")]
     PermissionRespond { id: String, option_id: Option<String> },
+    /// Turn chat access from the local network on/off (this PC's UI only).
+    #[serde(rename = "lan.set")]
+    LanSet { enabled: bool },
+    /// New access token: devices signed in so far are logged out (this PC's UI only).
+    #[serde(rename = "lan.resetToken")]
+    LanResetToken,
     /// Open an http(s) link in the default browser (links must not navigate the overlay).
     #[serde(rename = "ui.openUrl")]
     UiOpenUrl { url: String },
@@ -361,6 +398,9 @@ pub enum ServerMsg {
     OverlayShow { mode: PanelMode, game: Option<GameInfo> },
     #[serde(rename = "overlay.hidden")]
     OverlayHidden,
+    /// Phone access over the local network (this PC's UI only: it carries the token).
+    #[serde(rename = "lan.status")]
+    LanStatus { status: LanStatus },
 }
 
 #[cfg(test)]
@@ -376,6 +416,8 @@ mod tests {
         assert!(matches!(m, ClientMsg::UiSetMode { mode: PanelMode::Expanded }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"ui.resizeStart","edge":"nw"}"#).unwrap();
         assert!(matches!(m, ClientMsg::UiResizeStart { edge: ResizeEdge::Nw }));
+        let m: ClientMsg = serde_json::from_str(r#"{"type":"lan.set","enabled":true}"#).unwrap();
+        assert!(matches!(m, ClientMsg::LanSet { enabled: true }));
         let m: ClientMsg = serde_json::from_str(r#"{"type":"chat.open","id":"c1"}"#).unwrap();
         assert!(matches!(m, ClientMsg::ChatOpen { id } if id == "c1"));
         let m: ClientMsg = serde_json::from_str(

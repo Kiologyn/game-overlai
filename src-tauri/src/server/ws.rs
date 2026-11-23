@@ -10,7 +10,7 @@ use super::Ctx;
 use crate::protocol::{ClientKind, ClientMsg, ServerMsg};
 use crate::state::Target;
 use crate::history::ProfileEdit;
-use crate::{chat, games, overlay};
+use crate::{chat, games, lan, overlay};
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -19,16 +19,19 @@ pub struct WsQuery {
 
 pub async fn handler(ws: WebSocketUpgrade, Query(q): Query<WsQuery>, State(ctx): State<Ctx>) -> Response {
     let kind = match q.client.as_deref() {
-        Some("overlay") => ClientKind::Overlay,
+        Some("overlay") if !ctx.lan => ClientKind::Overlay,
         _ => ClientKind::Browser,
     };
     ws.on_upgrade(move |socket| session(socket, kind, ctx))
 }
 
 async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
-    debug!("ws connected: {kind:?}");
+    debug!("ws connected: {kind:?}{}", if ctx.lan { " (LAN)" } else { "" });
     let (mut sink, mut stream) = socket.split();
     let mut events = ctx.state.hub.subscribe();
+    // A device on the network: counted, and dropped when access ends (off / token reset).
+    let _device = ctx.lan.then(|| lan::client(&ctx.state));
+    let mut lan_generation = ctx.state.lan.generation();
 
     let mut initial = vec![
         ServerMsg::Hello { version: env!("CARGO_PKG_VERSION").into(), client: kind },
@@ -38,6 +41,9 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         chat::permissions(&ctx.state),
         ServerMsg::AgentStatus { status: ctx.state.agent_status.lock().unwrap().clone() },
     ];
+    if !ctx.lan {
+        initial.push(lan::status(&ctx.state));
+    }
     if let Some(usage) = ctx.state.usage.lock().unwrap().clone() {
         initial.push(ServerMsg::AgentUsage { usage });
     }
@@ -63,7 +69,12 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
             },
             event = events.recv() => match event {
                 Ok((target, msg)) => {
-                    if (target == Target::All || kind == ClientKind::Overlay) && send(&mut sink, &msg).await.is_err() {
+                    let wanted = match target {
+                        Target::All => true,
+                        Target::Overlay => kind == ClientKind::Overlay,
+                        Target::Local => !ctx.lan,
+                    };
+                    if wanted && send(&mut sink, &msg).await.is_err() {
                         break;
                     }
                 }
@@ -75,6 +86,11 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
                 }
                 Err(RecvError::Closed) => break,
             },
+            _ = lan_generation.changed(), if ctx.lan => {
+                debug!("ws: LAN access ended, device dropped");
+                let _ = sink.send(Message::Close(None)).await;
+                break;
+            }
         }
     }
     debug!("ws disconnected: {kind:?}");
@@ -108,7 +124,13 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             overlay::run_on_main(&ctx.app, move |app| overlay::start_resize(app, edge))
         }
         ClientMsg::UiHide | ClientMsg::UiSetMode { .. } | ClientMsg::UiDragStart | ClientMsg::UiResizeStart { .. } => {}
-        ClientMsg::ChatSend { text, screenshot, new_chat } => chat::send(&ctx.state, &text, screenshot, new_chat),
+        // From a phone the game is whatever runs on the PC now (the overlay may never have opened).
+        ClientMsg::ChatSend { text, screenshot, new_chat } => {
+            if ctx.lan {
+                overlay::adopt_foreground_game(&ctx.state);
+            }
+            chat::send(&ctx.state, &text, screenshot, new_chat)
+        }
         ClientMsg::ChatCancel => chat::cancel(&ctx.state),
         ClientMsg::ChatNew => chat::new_chat(&ctx.state),
         ClientMsg::ChatOpen { id } => chat::open(&ctx.state, &id),
@@ -117,6 +139,12 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             games::update(&ctx.state, &exe, ProfileEdit { name, instructions, sources, screenshot })
         }
         ClientMsg::PermissionRespond { id, option_id } => chat::respond_permission(&ctx.state, &id, option_id),
+        // This PC's UI only: devices on the network can't change access or open things on the PC.
+        ClientMsg::LanSet { .. } | ClientMsg::LanResetToken | ClientMsg::UiOpenUrl { .. } if ctx.lan => {
+            warn!("LAN device sent a local-only message: ignored");
+        }
+        ClientMsg::LanSet { enabled } => lan::set_enabled(&ctx.state, enabled),
+        ClientMsg::LanResetToken => lan::reset_token(&ctx.state),
         ClientMsg::UiOpenUrl { url } => {
             if url.starts_with("https://") || url.starts_with("http://") {
                 use tauri_plugin_opener::OpenerExt;

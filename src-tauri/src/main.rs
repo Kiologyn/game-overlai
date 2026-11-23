@@ -8,6 +8,7 @@ mod config;
 mod games;
 mod hotkeys;
 mod history;
+mod lan;
 mod logging;
 mod mcp;
 mod overlay;
@@ -90,6 +91,7 @@ fn main() {
             overlay::create(&handle, &state)?;
             *state.failed_hotkeys.lock().unwrap() = hotkeys::register(&handle);
             tray::build(app)?;
+            lan::start_if_enabled(&state);
             debug_show_on_start(&handle);
             info!("ready: {} = quick question, {} = chat", state.config.hotkeys.quick, state.config.hotkeys.chat);
             Ok(())

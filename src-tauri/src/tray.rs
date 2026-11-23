@@ -1,8 +1,7 @@
 //! Tray icon: left click opens the chat, right click shows the menu.
-//! Later phases add: agent status and subscription limits in the tooltip, agent choice,
-//! phone QR code, settings, autostart.
+//! Later phases add: agent choice, settings, autostart.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -12,11 +11,15 @@ use tracing::warn;
 
 use crate::config::pretty_hotkey;
 use crate::hotkeys;
+use crate::lan;
 use crate::overlay::{self, ShowSource};
 use crate::protocol::{AgentState, PanelMode, Usage};
 use crate::state::AppState;
 
 pub const TRAY_ID: &str = "main";
+
+/// "Access from the phone" item: kept in sync when access is changed on the /phone page.
+static LAN_ITEM: OnceLock<CheckMenuItem<tauri::Wry>> = OnceLock::new();
 
 pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let st = app.state::<Arc<AppState>>().inner().clone();
@@ -26,6 +29,8 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let quick = MenuItem::with_id(app, "quick", format!("Быстрый вопрос\t{quick_key}"), true, None::<&str>)?;
     let chat = MenuItem::with_id(app, "chat", format!("Открыть чат\t{chat_key}"), true, None::<&str>)?;
     let browser = MenuItem::with_id(app, "browser", "Открыть чат в браузере", true, None::<&str>)?;
+    let lan_on = CheckMenuItem::with_id(app, "lan", "Доступ с телефона (Wi-Fi)", true, lan::enabled(&st), None::<&str>)?;
+    let phone = MenuItem::with_id(app, "phone", "Телефон: QR-код…", true, None::<&str>)?;
     let pause = CheckMenuItem::with_id(app, "pause", "Пауза горячих клавиш", true, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -35,6 +40,9 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
             &chat,
             &browser,
             &PredefinedMenuItem::separator(app)?,
+            &lan_on,
+            &phone,
+            &PredefinedMenuItem::separator(app)?,
             &pause,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -42,6 +50,8 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
     )?;
 
     let pause_item = pause.clone();
+    let lan_item = lan_on.clone();
+    let _ = LAN_ITEM.set(lan_on.clone());
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().cloned().expect("app icon"))
         .tooltip(tooltip(&st))
@@ -51,6 +61,15 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
             "quick" => overlay::show(app, PanelMode::Compact, ShowSource::Other),
             "chat" => overlay::show(app, PanelMode::Expanded, ShowSource::Other),
             "browser" => open_in_browser(app),
+            "lan" => {
+                let on = lan_item.is_checked().unwrap_or(false);
+                let st = app.state::<Arc<AppState>>().inner().clone();
+                lan::set_enabled(&st, on);
+                if on {
+                    open_phone_page(app); // the QR code is what the user needs next
+                }
+            }
+            "phone" => open_phone_page(app),
             "pause" => {
                 let paused = pause_item.is_checked().unwrap_or(false);
                 hotkeys::set_paused(app, paused);
@@ -82,6 +101,9 @@ fn tooltip(st: &AppState) -> String {
         let week = seven_day.map(|w| format!(" · неделя {:.0}%", w * 100.0)).unwrap_or_default();
         lines.push(format!("Лимит 5 ч: {:.0}%{week}", five * 100.0));
     }
+    if lan::enabled(st) {
+        lines.push("Доступ с телефона включён".into());
+    }
     if st.hotkeys_paused.load(std::sync::atomic::Ordering::SeqCst) {
         lines.push("Горячие клавиши на паузе".into());
     } else {
@@ -111,7 +133,29 @@ pub fn refresh_tooltip(app: &AppHandle) {
 
 pub fn open_in_browser(app: &AppHandle) {
     let url = app.state::<Arc<AppState>>().browser_url();
-    if let Err(e) = app.opener().open_url(&url, None::<&str>) {
+    open_url(app, &url);
+}
+
+/// The /phone page on this PC: QR code, addresses, access on/off.
+pub fn open_phone_page(app: &AppHandle) {
+    let url = format!("{}phone", app.state::<Arc<AppState>>().browser_url());
+    open_url(app, &url);
+}
+
+fn open_url(app: &AppHandle, url: &str) {
+    if let Err(e) = app.opener().open_url(url, None::<&str>) {
         warn!("could not open {url}: {e}");
     }
+}
+
+/// Syncs the "access from the phone" check mark (and the tooltip) with the actual state.
+pub fn refresh_lan(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let st = handle.state::<Arc<AppState>>();
+        if let Some(item) = LAN_ITEM.get() {
+            let _ = item.set_checked(lan::enabled(&st));
+        }
+        refresh_tooltip(&handle);
+    });
 }

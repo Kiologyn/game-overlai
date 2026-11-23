@@ -29,6 +29,12 @@ its name for the agent, standing instructions (spoilers, character, language...)
 the 📷 default, and its chats. The agent gets the profile in the system prompt of a new session; a resumed
 session keeps its first system prompt (Claude Code), so a changed profile is sent with the next question.
 
+Phone: tray → "Доступ с телефона (Wi-Fi)" turns on a second server for the local network (port 47824,
+off by default) and opens http://127.0.0.1:47823/phone with the QR code. The QR link carries an access
+token once and leaves a cookie; without it the LAN server answers 401. It serves the browser chat only
+(no MCP, no overlay or access controls); "Сбросить доступ" signs every device out. A question from the
+phone takes the window in the foreground on the PC as the game (and 📷 captures it).
+
 ## Layout
 
 | Path | What |
@@ -40,7 +46,8 @@ session keeps its first system prompt (Claude Code), so a changed profile is sen
 | `src-tauri/src/games.rs` | game profiles (per exe): name, instructions, sources, 📷 default |
 | `src-tauri/src/capture/`, `shots.rs` | game frames: Windows Graphics Capture, JPEG encoding, storage |
 | `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): `screenshot_game` |
-| `src-tauri/src/server/` | local HTTP + WebSocket server the UI talks to |
+| `src-tauri/src/server/` | HTTP + WebSocket servers the UI talks to: local (127.0.0.1) and LAN (token) |
+| `src-tauri/src/lan.rs` | phone access: on/off, token, addresses, QR codes |
 | `src-tauri/src/protocol.rs` | WebSocket protocol; TS types are generated from it |
 | `src-tauri/src/proxy.rs`, `config.rs`, `tray.rs`, `hotkeys.rs` | network proxy, settings, tray, global hotkeys |
 | `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/` = browser chat |
@@ -62,9 +69,11 @@ session keeps its first system prompt (Claude Code), so a changed profile is sen
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
   `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,
   0 = full; never over 2000 px a side); saved frames stay full size.
+  `[lan] port = 47824` — port for phones (a free one if busy).
 - History: `%LOCALAPPDATA%\game-overlai\history.db` (chats, game profiles, panel places) + `shots\` (frames,
-  deleted with their chat).
+  deleted with their chat). `lan.json` there: phone access on/off and its token.
 - Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).
 
 Debug switches: `OVERLAI_UI_DEV=http://localhost:5173` (UI from Vite), `OVERLAI_DEBUG_SHOW=compact|expanded`
-(open the panel on start), `OVERLAI_DEBUG_CAPTURABLE=1` (panel visible in screenshots).
+(open the panel on start), `OVERLAI_DEBUG_CAPTURABLE=1` (panel visible in screenshots),
+`OVERLAI_LAN_ADDR=127.0.0.1` (phone server on this PC only: tests without the firewall prompt).

@@ -13,6 +13,21 @@ pub struct Config {
     pub panel: PanelConfig,
     pub network: NetworkConfig,
     pub capture: CaptureConfig,
+    pub lan: LanConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LanConfig {
+    /// Port for phones on the local network (only while "access from the phone" is on in the
+    /// tray; a free one is taken if it is busy).
+    pub port: u16,
+}
+
+impl Default for LanConfig {
+    fn default() -> Self {
+        Self { port: 47824 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +94,7 @@ impl Default for Config {
             panel: PanelConfig::default(),
             network: NetworkConfig::default(),
             capture: CaptureConfig::default(),
+            lan: LanConfig::default(),
         }
     }
 }
@@ -173,6 +189,7 @@ mod tests {
         assert_eq!(partial.hotkeys.chat, "alt+w");
         assert_eq!(partial.panel.width, 640.0);
         assert_eq!(partial.capture.agent_max_height, 720);
+        assert_eq!(partial.lan.port, 47824);
         assert!(!partial.network.requires_proxy("claude"), "no proxy requirement by default");
         let strict: Config = toml::from_str("[network]\nrequire_proxy_for = [\"Claude\"]\n").unwrap();
         assert!(strict.network.requires_proxy("claude") && !strict.network.requires_proxy("codex"));

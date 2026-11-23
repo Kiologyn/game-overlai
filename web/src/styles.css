@@ -1293,3 +1293,238 @@ html[data-surface="overlay"] .shot-viewer {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ------------------------------------------------------------------ phone: narrow screens */
+
+.nav-toggle {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .nav-toggle {
+    display: inline-grid;
+    margin-left: -8px;
+  }
+  .topbar {
+    gap: 8px;
+    padding: 0 8px 0 12px;
+  }
+  .browser-workspace {
+    position: relative;
+  }
+  .history-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(300px, 84vw);
+    flex-basis: auto;
+    transform: translateX(-100%);
+    transition: transform 160ms ease-out;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+  }
+  .history-sidebar.open {
+    transform: none;
+  }
+  .nav-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 19;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .history-heading {
+    display: none;
+  }
+  .history-search {
+    margin-top: 12px;
+  }
+  .history-open,
+  .history-group-title {
+    min-height: 40px; /* finger-sized */
+  }
+  .game-page {
+    padding: 12px 14px 24px;
+  }
+  .page-composer .input {
+    font-size: 16px; /* iOS zooms into smaller inputs */
+  }
+  .shot-viewer {
+    padding: 44px 0 0;
+  }
+}
+
+/* ------------------------------------------------------------------ /phone page (on the PC) */
+
+.phone-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.phone-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phone-page h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.phone-note {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.switch-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  transition: background 120ms;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 120ms, background 120ms;
+}
+
+.switch-row input:checked + .switch {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.switch-row input:checked + .switch::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.switch-row input:focus-visible + .switch {
+  outline: 1px solid var(--muted);
+  outline-offset: 2px;
+}
+
+.phone-error {
+  padding: 10px 12px;
+  border: 1px solid var(--bad);
+  border-radius: 8px;
+  color: var(--bad);
+  font-size: 13px;
+}
+
+.phone-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.phone-qr {
+  flex: none;
+  width: 240px;
+  height: 240px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.phone-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.phone-card-text {
+  flex: 1 1 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.phone-card-text p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.phone-url {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-url code {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 13px;
+  user-select: all;
+}
+
+.phone-card .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phone-adapter {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.phone-adapter select {
+  margin-left: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.phone-clients {
+  font-size: 13px;
+}
+
+.phone-hints {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

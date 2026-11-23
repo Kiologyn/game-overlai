@@ -10,6 +10,7 @@ use crate::capture::{Capturer, Frame};
 use crate::chat::ChatState;
 use crate::config::Config;
 use crate::history::History;
+use crate::lan::Lan;
 use crate::protocol::{AgentState, AgentStatus, GameInfo, PanelMode, ServerMsg, Usage};
 
 pub struct AppState {
@@ -20,6 +21,8 @@ pub struct AppState {
     pub ui_base: String,
     pub profiles_dir: std::path::PathBuf,
     pub history: History,
+    /// Chat access for phones on the local network.
+    pub lan: Lan,
     pub hub: Hub,
     pub chat: Mutex<ChatState>,
     pub overlay: Mutex<OverlayState>,
@@ -50,6 +53,7 @@ impl AppState {
         let hotkeys = HotkeySet::parse(&config);
         let agent_status = AgentStatus { agent: agent.spec.name.into(), state: AgentState::Starting, detail: None };
         let history = History::open(&history_dir);
+        let lan = Lan::load(&history_dir, config.lan.port);
         let chat = history
             .latest()
             .and_then(|id| history.load(&id))
@@ -61,6 +65,7 @@ impl AppState {
             ui_base,
             profiles_dir,
             history,
+            lan,
             hub: Hub::new(),
             chat: Mutex::new(chat),
             overlay: Mutex::new(OverlayState::default()),
@@ -132,6 +137,8 @@ pub enum Target {
     All,
     /// Only overlay panel connections.
     Overlay,
+    /// UIs on this PC (overlay + local browser tabs), not devices on the network.
+    Local,
 }
 
 /// Fan-out of server messages to all WebSocket sessions.
