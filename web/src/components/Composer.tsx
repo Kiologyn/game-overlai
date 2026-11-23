@@ -40,7 +40,7 @@ export function Composer(props: Props) {
       {props.onDragStart && (
         <span
           className="drag-grip"
-          title="Перетащить панель"
+          aria-label="Перетащить панель"
           onPointerDown={(e) => {
             if (e.button !== 0) return;
             e.preventDefault();
