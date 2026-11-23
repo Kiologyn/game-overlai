@@ -50,6 +50,7 @@ fn values_of(cfg: &Config) -> SettingsValues {
         panel_width: cfg.panel.width,
         panel_height: cfg.panel.expanded_height,
         panel_zoom: crate::overlay::snap_zoom(cfg.panel.zoom),
+        panel_capturable: cfg.panel.capturable,
         agent_max_height: cfg.capture.agent_max_height,
         lan_port: cfg.lan.port,
         notifications: cfg.notifications.enabled,
@@ -97,6 +98,7 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     cfg.panel.width = v.panel_width.round();
     cfg.panel.expanded_height = v.panel_height.round();
     cfg.panel.zoom = crate::overlay::snap_zoom(v.panel_zoom);
+    cfg.panel.capturable = v.panel_capturable;
     cfg.capture.agent_max_height = v.agent_max_height;
     cfg.lan.port = v.lan_port;
     cfg.notifications.enabled = v.notifications;
@@ -151,6 +153,11 @@ pub fn save(state: &Arc<AppState>, values: SettingsValues) {
             info!("settings saved");
             *LAST_ERROR.lock().unwrap() = None;
             *state.config.write().unwrap() = next.clone();
+            if before.panel.capturable != next.panel.capturable
+                && let Some(app) = state.app.get()
+            {
+                crate::overlay::run_on_main(app, crate::overlay::update_capturable);
+            }
             if before.hotkeys != next.hotkeys
                 && let Some(app) = state.app.get()
             {

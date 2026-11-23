@@ -120,6 +120,7 @@ pub fn grab(d3d: &D3D, items: &mut ItemCache, hwnd: HWND) -> Result<Frame, Failu
         return Err(failure);
     }
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let _panel_hidden = crate::overlay::win32::out_of_capture(); // if the user lets it into captures
     let item: GraphicsCaptureItem = unsafe { interop.CreateForMonitor(monitor)? };
     match capture(d3d, &item, Source::Monitor)? {
         frame if frame.is_black() => Err(Failure::user("кадр получился чёрным: игра не даёт себя захватить")),

@@ -81,11 +81,7 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
         .build()?;
 
     let hwnd = panel_hwnd(&window);
-    if std::env::var_os("OVERLAI_DEBUG_CAPTURABLE").is_some() {
-        warn!("OVERLAI_DEBUG_CAPTURABLE: the panel is visible in screenshots");
-    } else if !win32::exclude_from_capture(hwnd) {
-        warn!("could not exclude the panel from screen capture");
-    }
+    apply_capturable(state, hwnd);
 
     // Moves and resizes by the user stay inside the game window; the result is remembered.
     let on_moved = app.clone();
@@ -103,6 +99,26 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
     });
     info!("panel window created ({})", state.ui_base);
     Ok(())
+}
+
+/// The settings changed: show or hide the panel in screen captures.
+pub fn update_capturable(app: &AppHandle) {
+    if let Some(w) = panel(app) {
+        apply_capturable(&state(app), panel_hwnd(&w));
+    }
+}
+
+/// The panel in screenshots, recordings and streams: hidden unless the user lets it in
+/// (`[panel] capturable`, or OVERLAI_DEBUG_CAPTURABLE for tests). Frames for the agent never
+/// show it (`capture::wgc` hides it for monitor captures).
+fn apply_capturable(st: &AppState, hwnd: windows::Win32::Foundation::HWND) {
+    let forced = std::env::var_os("OVERLAI_DEBUG_CAPTURABLE").is_some();
+    let on = forced || st.config.read().unwrap().panel.capturable;
+    if win32::set_capturable(hwnd, on) {
+        info!("panel {} in screen captures{}", if on { "visible" } else { "hidden" }, if forced { " (OVERLAI_DEBUG_CAPTURABLE)" } else { "" });
+    } else {
+        warn!("could not make the panel {} in screen captures", if on { "visible" } else { "hidden" });
+    }
 }
 
 pub fn run_on_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {

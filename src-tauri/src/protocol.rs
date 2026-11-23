@@ -321,6 +321,8 @@ pub struct SettingsValues {
     pub panel_height: f64,
     /// Default panel zoom (1.0 = 100%) for games it hasn't been zoomed over.
     pub panel_zoom: f64,
+    /// The panel shows in screenshots, recordings and streams.
+    pub panel_capturable: bool,
     /// Height of frames sent to the agent (0 = full).
     pub agent_max_height: u32,
     pub lan_port: u16,

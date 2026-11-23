@@ -1,5 +1,7 @@
 //! Thin wrappers over the Win32 calls the overlay needs.
 
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
@@ -15,7 +17,7 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, SetWindowDisplayAffinity,
-    EnumChildWindows, PostMessageW, WDA_EXCLUDEFROMCAPTURE, WM_EXITSIZEMOVE, WM_LBUTTONUP, WM_MOVING, WM_SIZING,
+    EnumChildWindows, PostMessageW, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WM_EXITSIZEMOVE, WM_LBUTTONUP, WM_MOVING, WM_SIZING,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -128,9 +130,44 @@ pub fn set_foreground(h: HWND) -> bool {
     unsafe { SetForegroundWindow(h).as_bool() }
 }
 
-/// Keeps the panel out of screenshots/streams (and out of our own game captures).
-pub fn exclude_from_capture(h: HWND) -> bool {
-    unsafe { SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE).is_ok() }
+/// The panel window, and whether the user lets it into screen captures (settings).
+static PANEL: AtomicIsize = AtomicIsize::new(0);
+static CAPTURABLE: AtomicBool = AtomicBool::new(false);
+
+/// Shows or hides the panel in screenshots, recordings and streams (OBS, Discord, Win+Shift+S...).
+pub fn set_capturable(h: HWND, capturable: bool) -> bool {
+    PANEL.store(raw(h), Ordering::SeqCst);
+    CAPTURABLE.store(capturable, Ordering::SeqCst);
+    let affinity = if capturable { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
+    unsafe { SetWindowDisplayAffinity(h, affinity).is_ok() }
+}
+
+/// Keeps the panel out of capture while it lives, even if the user lets it in: our own
+/// captures of the whole monitor (frames for the agent) must show the game only.
+pub struct OutOfCapture(Option<HWND>);
+
+pub fn out_of_capture() -> OutOfCapture {
+    let h = hwnd(PANEL.load(Ordering::SeqCst));
+    if !CAPTURABLE.load(Ordering::SeqCst) || h.is_invalid() {
+        return OutOfCapture(None); // already out
+    }
+    match unsafe { SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE) } {
+        Ok(()) => OutOfCapture(Some(h)),
+        Err(e) => {
+            tracing::warn!("could not hide the panel from a monitor capture: {e}");
+            OutOfCapture(None)
+        }
+    }
+}
+
+impl Drop for OutOfCapture {
+    fn drop(&mut self) {
+        if let Some(h) = self.0
+            && CAPTURABLE.load(Ordering::SeqCst)
+        {
+            let _ = unsafe { SetWindowDisplayAffinity(h, WDA_NONE) };
+        }
+    }
 }
 
 /// Screen area to place the panel in, and its DPI scale.

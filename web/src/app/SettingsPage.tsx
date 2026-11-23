@@ -185,6 +185,19 @@ export function SettingsPage({ conn }: { conn: Connection }) {
             Для игр, над которыми панель ещё не двигали. Положение, размер и масштаб над каждой игрой запоминаются
             сами. Масштаб панели: Ctrl + колесо мыши или Ctrl +/− над панелью, Ctrl+0 — вернуть масштаб по умолчанию.
           </p>
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={form.panelCapturable}
+              onChange={(e) => set("panelCapturable", e.target.checked)}
+            />
+            Показывать панель на записи и трансляции экрана
+          </label>
+          <p className="field-hint">
+            Выключено: Windows прячет панель из скриншотов, записи и трансляций (OBS, Discord, Win+Shift+S). Включено:
+            её видно при захвате экрана или окна. Захват игры в OBS (Game Capture) берёт кадры у самой игры и панель
+            не видит в любом случае, а кадры игры для агента всегда без панели.
+          </p>
           <button
             type="button"
             className="btn"

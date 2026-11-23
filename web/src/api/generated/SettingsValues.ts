@@ -29,6 +29,10 @@ panelWidth: number, panelHeight: number,
  */
 panelZoom: number, 
 /**
+ * The panel shows in screenshots, recordings and streams.
+ */
+panelCapturable: boolean, 
+/**
  * Height of frames sent to the agent (0 = full).
  */
 agentMaxHeight: number, lanPort: number, notifications: boolean, };

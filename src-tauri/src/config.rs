@@ -103,6 +103,8 @@ pub struct PanelConfig {
     pub bottom_margin: f64,
     /// Scale of the panel for games it hasn't been zoomed over (1.0 = 100%; 0.5..2.0).
     pub zoom: f64,
+    /// The panel shows in screenshots, recordings and streams (off: Windows keeps it out).
+    pub capturable: bool,
 }
 
 impl Default for Config {
@@ -128,7 +130,7 @@ impl Default for Hotkeys {
 
 impl Default for PanelConfig {
     fn default() -> Self {
-        Self { width: 640.0, expanded_height: 540.0, bottom_margin: 64.0, zoom: 1.0 }
+        Self { width: 640.0, expanded_height: 540.0, bottom_margin: 64.0, zoom: 1.0, capturable: false }
     }
 }
 
