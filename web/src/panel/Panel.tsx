@@ -145,6 +145,9 @@ export function Panel({ conn }: { conn: Connection }) {
             gameName={gameLabel(game, ui.games)}
             onOpenGame={openGame}
             agentName={ui.agent?.agent ?? "Claude"}
+            agentOptions={ui.agentOptions}
+            onSetAgentOption={(id, value) => conn.send({ type: "agent.setOption", id, value })}
+            onBeforeModelMenu={mode === "compact" ? expand : undefined}
             placeholder={
               mode === "compact"
                 ? agentDown

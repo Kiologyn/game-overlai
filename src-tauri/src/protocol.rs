@@ -298,6 +298,40 @@ pub struct LanStatus {
     pub error: Option<String>,
 }
 
+// ------------------------------------------------------------------ agent options
+
+/// What an option of the agent's session sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum AgentOptionKind {
+    Model,
+    /// Reasoning effort ("thought level" in ACP).
+    Effort,
+}
+
+/// A choice the agent offers for its sessions (model, reasoning effort), as it reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AgentOption {
+    /// The agent's id for the option, e.g. "model", "effort".
+    pub id: String,
+    pub kind: AgentOptionKind,
+    pub name: String,
+    pub current: String,
+    pub values: Vec<AgentOptionValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AgentOptionValue {
+    pub value: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
 // ------------------------------------------------------------------ settings
 
 /// What the settings page edits (saved to config.toml).
@@ -387,6 +421,9 @@ pub enum ClientMsg {
         /// Start a new chat with this message (sent from the quick field).
         new_chat: bool,
     },
+    /// Pick a model / reasoning effort: applies to the current chat now and to later chats.
+    #[serde(rename = "agent.setOption")]
+    AgentSetOption { id: String, value: String },
     /// Stop the answer being generated.
     #[serde(rename = "chat.cancel")]
     ChatCancel,
@@ -486,6 +523,9 @@ pub enum ServerMsg {
     AgentStatus { status: AgentStatus },
     #[serde(rename = "agent.usage")]
     AgentUsage { usage: Usage },
+    /// The agent's model / effort choices with their current values (empty: it offers none).
+    #[serde(rename = "agent.options")]
+    AgentOptions { options: Vec<AgentOption> },
     /// The overlay panel was shown by a hotkey/tray (overlay only).
     #[serde(rename = "overlay.show")]
     OverlayShow { mode: PanelMode, game: Option<GameInfo> },

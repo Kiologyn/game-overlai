@@ -292,6 +292,36 @@ pub fn send(state: &Arc<AppState>, text: &str, new_chat: bool, from_overlay: boo
     tauri::async_runtime::spawn(run_turn(state.clone(), turn));
 }
 
+/// The user picked a model / effort: remembered (config.toml, per agent) and applied to the
+/// current chat's live session now; other chats get it when their session starts or resumes.
+pub fn set_agent_option(state: &Arc<AppState>, id: &str, value: &str) {
+    let offered = state
+        .agent_options
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|o| o.id == id && o.values.iter().any(|v| v.value == value));
+    if !offered {
+        warn!("agent.setOption {id}={value}: not offered by the agent");
+        return;
+    }
+    let agent_id = state.agent.spec.id;
+    let saved = {
+        let mut cfg = state.config.write().unwrap();
+        cfg.agent_options.entry(agent_id.to_string()).or_default().insert(id.to_string(), value.to_string());
+        crate::config::save(&state.config_file, &cfg)
+    };
+    if let Err(e) = saved {
+        warn!("can't save the agent option: {e}");
+    }
+    let live = {
+        let chat = state.chat.lock().unwrap();
+        chat.session_id.clone().filter(|_| chat.session_generation == Some(state.agent.generation()))
+    };
+    info!("agent option {id} = {value} (live session: {})", live.is_some());
+    state.agent.set_option(live, id.to_string(), value.to_string());
+}
+
 /// Stops the answer being generated (the prompt then ends with "cancelled").
 pub fn cancel(state: &Arc<AppState>) {
     let session = {
@@ -646,6 +676,14 @@ fn handle_event(state: &Arc<AppState>, event: AgentEvent) {
             *state.agent_status.lock().unwrap() = status.clone();
             state.hub.send(Target::All, ServerMsg::AgentStatus { status });
             refresh_tray(state);
+        }
+        AgentEvent::Options(options) => {
+            debug!(
+                "agent options: {}",
+                options.iter().map(|o| format!("{}={}", o.id, o.current)).collect::<Vec<_>>().join(", ")
+            );
+            *state.agent_options.lock().unwrap() = options.clone();
+            state.hub.send(Target::All, ServerMsg::AgentOptions { options });
         }
         AgentEvent::Usage(usage) => {
             let changed = state.usage.lock().unwrap().replace(usage.clone()).as_ref() != Some(&usage);

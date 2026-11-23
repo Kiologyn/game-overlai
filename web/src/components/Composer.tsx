@@ -1,6 +1,8 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { ArrowUp, Gamepad2, GripVertical, Square, X } from "lucide-react";
+import type { AgentOption } from "../api/generated/AgentOption";
 import type { GameInfo } from "../api/generated/GameInfo";
+import { ModelPicker } from "./ModelPicker";
 
 interface Props {
   value: string;
@@ -17,6 +19,11 @@ interface Props {
   /** Click on the game chip: open the game's profile. */
   onOpenGame?: () => void;
   agentName: string;
+  /** Model / effort choices of the agent. */
+  agentOptions: AgentOption[];
+  onSetAgentOption(id: string, value: string): void;
+  /** Overlay, compact panel: expand before the model menu opens. */
+  onBeforeModelMenu?: () => void;
   placeholder: string;
   inputRef?: RefObject<HTMLInputElement | null>;
   /** Overlay, compact panel: a grip to move the panel by. */
@@ -77,9 +84,12 @@ export function Composer(props: Props) {
         autoComplete="off"
         spellCheck={false}
       />
-      <span className="agent" title="Модель">
-        {agentName}
-      </span>
+      <ModelPicker
+        options={props.agentOptions}
+        agentName={agentName}
+        onSet={props.onSetAgentOption}
+        onBeforeOpen={props.onBeforeModelMenu}
+      />
       {busy ? (
         <button type="button" className="icon-btn send stop" onClick={onStop} title="Остановить ответ">
           <Square size={12} fill="currentColor" />

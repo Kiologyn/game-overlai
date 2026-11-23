@@ -10,6 +10,7 @@ import type { ClientMsg } from "./generated/ClientMsg";
 import type { GameInfo } from "./generated/GameInfo";
 import type { GameProfile } from "./generated/GameProfile";
 import type { LanStatus } from "./generated/LanStatus";
+import type { AgentOption } from "./generated/AgentOption";
 import type { Settings } from "./generated/Settings";
 import { sameExe } from "./games";
 import type { PanelMode } from "./generated/PanelMode";
@@ -34,6 +35,8 @@ export interface UiState {
   permissions: PermissionPrompt[];
   agent: AgentStatus | null;
   usage: Usage | null;
+  /** The agent's model / effort choices (empty: it offers none). */
+  agentOptions: AgentOption[];
   /** Phone access over the local network; only this PC's UI gets it. */
   lan: LanStatus | null;
   /** Settings page state; only this PC's UI gets it. */
@@ -67,6 +70,7 @@ const initial: UiState = {
   permissions: [],
   agent: null,
   usage: null,
+  agentOptions: [],
   lan: null,
   settings: null,
   overlay: { visible: false, mode: "compact", game: null, showSeq: 0, zoom: 1, zoomSeq: 0 },
@@ -142,6 +146,8 @@ function reduce(s: UiState, msg: ServerMsg): UiState {
       return { ...s, agent: msg.status };
     case "agent.usage":
       return { ...s, usage: msg.usage };
+    case "agent.options":
+      return { ...s, agentOptions: msg.options };
     case "overlay.show":
       return {
         ...s,

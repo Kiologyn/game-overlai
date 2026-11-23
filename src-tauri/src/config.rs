@@ -17,6 +17,9 @@ pub struct Config {
     pub capture: CaptureConfig,
     pub lan: LanConfig,
     pub notifications: NotificationsConfig,
+    /// The user's model / effort choices per agent id: option id -> value, e.g.
+    /// `[agent_options.claude] model = "sonnet"`, `effort = "high"`. Last: TOML tables follow values.
+    pub agent_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +121,7 @@ impl Default for Config {
             capture: CaptureConfig::default(),
             lan: LanConfig::default(),
             notifications: NotificationsConfig::default(),
+            agent_options: Default::default(),
         }
     }
 }

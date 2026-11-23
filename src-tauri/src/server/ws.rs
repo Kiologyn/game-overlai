@@ -40,6 +40,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         games::list(&ctx.state),
         chat::permissions(&ctx.state),
         ServerMsg::AgentStatus { status: ctx.state.agent_status.lock().unwrap().clone() },
+        ServerMsg::AgentOptions { options: ctx.state.agent_options.lock().unwrap().clone() },
     ];
     if !ctx.lan {
         initial.push(lan::status(&ctx.state));
@@ -140,6 +141,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             chat::send(&ctx.state, &text, new_chat, kind == ClientKind::Overlay)
         }
         ClientMsg::ChatCancel => chat::cancel(&ctx.state),
+        ClientMsg::AgentSetOption { id, value } => chat::set_agent_option(&ctx.state, &id, &value),
         ClientMsg::ChatNew => chat::new_chat(&ctx.state),
         ClientMsg::ChatOpen { id } => chat::open(&ctx.state, &id),
         ClientMsg::ChatDelete { id } => chat::delete(&ctx.state, &id),

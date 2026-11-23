@@ -38,6 +38,8 @@ pub struct AppState {
     pub capture: Capturer,
     pub agent_status: Mutex<AgentStatus>,
     pub usage: Mutex<Option<Usage>>,
+    /// The agent's model / effort choices as last reported.
+    pub agent_options: Mutex<Vec<crate::protocol::AgentOption>>,
     /// Hotkeys another program holds (shown in the tray tooltip).
     pub failed_hotkeys: Mutex<Vec<String>>,
     /// Set once Tauri is up; lets background tasks reach the tray.
@@ -84,6 +86,7 @@ impl AppState {
             capture: Capturer::start(),
             agent_status: Mutex::new(agent_status),
             usage: Mutex::new(None),
+            agent_options: Mutex::new(Vec::new()),
             failed_hotkeys: Mutex::new(Vec::new()),
             app: std::sync::OnceLock::new(),
         }

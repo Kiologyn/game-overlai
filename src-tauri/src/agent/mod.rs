@@ -7,7 +7,7 @@ mod acp;
 pub mod install;
 pub mod spec;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 pub use spec::AgentSpec;
 
-use crate::protocol::{AgentState, AgentStatus, PermissionPrompt, ToolInfo, ToolStatus, Usage};
+use crate::protocol::{AgentOption, AgentState, AgentStatus, PermissionPrompt, ToolInfo, ToolStatus, Usage};
 
 /// What the chat layer gets from an agent, independent of ACP.
 #[derive(Debug)]
@@ -26,6 +26,8 @@ pub enum AgentEvent {
     Status(AgentStatus),
     Update { session_id: String, update: Update },
     Usage(Usage),
+    /// Model / effort choices of the live session (or of a new one, before there is any).
+    Options(Vec<AgentOption>),
     PermissionRequested { session_id: String, prompt: PermissionPrompt },
     PermissionClosed { id: String },
 }
@@ -76,6 +78,9 @@ pub(crate) enum Cmd {
     },
     Prompt { session_id: String, blocks: Vec<PromptBlock>, reply: oneshot::Sender<Result<StopReason, String>> },
     Cancel { session_id: String },
+    /// Applies the user's choices (`Shared::prefs`) to the live session; without one, reports
+    /// what a new session would get.
+    ApplyOptions { session_id: Option<String> },
     /// Frees the session's process (~220 MB for Claude Code); it can be resumed later.
     CloseSession { session_id: String },
     /// Ends the connection; the supervisor starts the agent again (e.g. with a new proxy).
@@ -89,7 +94,7 @@ impl Cmd {
             Cmd::NewSession { reply, .. } => drop(reply.send(Err(msg.into()))),
             Cmd::RestoreSession { reply, .. } => drop(reply.send(Err(msg.into()))),
             Cmd::Prompt { reply, .. } => drop(reply.send(Err(msg.into()))),
-            Cmd::Cancel { .. } | Cmd::CloseSession { .. } | Cmd::Restart => {}
+            Cmd::Cancel { .. } | Cmd::CloseSession { .. } | Cmd::ApplyOptions { .. } | Cmd::Restart => {}
         }
     }
 }
@@ -115,6 +120,10 @@ pub(crate) struct Shared {
     prompts: AtomicUsize,
     /// The next start comes without the crash backoff (a restart we asked for).
     restart_now: AtomicBool,
+    /// The user's model / effort choices: option id -> value. Applied to every session.
+    prefs: Mutex<BTreeMap<String, String>>,
+    /// Options of the live session as the agent last reported them (ACP form).
+    options: Mutex<Vec<acp::RawOption>>,
 }
 
 impl Shared {
@@ -179,6 +188,7 @@ impl AgentHandle {
         agents_dir: PathBuf,
         proxy_setting: String,
         require_proxy: bool,
+        prefs: BTreeMap<String, String>,
         mcp: Option<McpEndpoint>,
         events: mpsc::UnboundedSender<AgentEvent>,
     ) -> Self {
@@ -193,6 +203,8 @@ impl AgentHandle {
             proxy: Mutex::new(None),
             prompts: AtomicUsize::new(0),
             restart_now: AtomicBool::new(false),
+            prefs: Mutex::new(prefs),
+            options: Mutex::new(Vec::new()),
         });
         tauri::async_runtime::spawn(supervise(
             spec,
@@ -241,6 +253,13 @@ impl AgentHandle {
     pub fn close_session(&self, session_id: String) {
         self.shared.dismiss_permissions(Some(&session_id));
         let _ = self.tx.send(Cmd::CloseSession { session_id });
+    }
+
+    /// The user picked `value` for option `id`: applied to `session_id` (the live one) now, and
+    /// to every session from then on.
+    pub fn set_option(&self, session_id: Option<String>, id: String, value: String) {
+        self.shared.prefs.lock().unwrap().insert(id, value);
+        let _ = self.tx.send(Cmd::ApplyOptions { session_id });
     }
 
     /// `None` dismisses the prompt (the agent sees it as cancelled).

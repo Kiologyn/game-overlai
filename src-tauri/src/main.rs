@@ -67,6 +67,7 @@ fn main() {
         paths.agents_dir.clone(),
         config.network.proxy.clone(),
         config.network.requires_proxy(spec.id),
+        config.agent_options.get(spec.id).cloned().unwrap_or_default(),
         Some(mcp.clone()),
         agent_events,
     );

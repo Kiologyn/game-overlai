@@ -80,6 +80,8 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
   hidden. Start with Windows = the `game-overlai` value under `HKCU\...\CurrentVersion\Run`.
   `[network] proxy = "system"` takes the Windows proxy (incl. PAC), else HTTP(S)_PROXY, else direct;
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
+  `[agent_options.<agent>]` — the model / effort picked in the input row (button left of ↑), applied to
+  every session of that agent; the choices are whatever the agent offers (ACP session config options).
   `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,
   0 = full; never over 2000 px a side); saved frames stay full size.
   `[lan] port = 47824` — port for phones (a free one if busy).

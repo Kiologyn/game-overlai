@@ -188,6 +188,8 @@ export function App({ conn }: { conn: Connection }) {
                   gameName={gameLabel(ui.chatGame, ui.games)}
                   onOpenGame={ui.chatGame?.exe ? () => showGame(ui.chatGame?.exe ?? null) : undefined}
                   agentName={ui.agent?.agent ?? "Claude"}
+                  agentOptions={ui.agentOptions}
+                  onSetAgentOption={(id, value) => conn.send({ type: "agent.setOption", id, value })}
                   placeholder="Сообщение…"
                 />
               </div>

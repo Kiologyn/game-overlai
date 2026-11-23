@@ -29,7 +29,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
-agent-client-protocol = { version = "5.4.0", features = ["process"] }
+agent-client-protocol = { version = "5.4.0", features = ["process", "unstable_session_options"] }
 rmcp = { version = "3.11.0", features = ["server", "macros", "transport-streamable-http-server"] }
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 base64 = "0.23"
