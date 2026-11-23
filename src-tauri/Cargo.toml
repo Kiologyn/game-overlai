@@ -63,6 +63,11 @@ features = [
     "Win32_UI_WindowsAndMessaging",
 ]
 
+# Debug builds: light optimisation for our crate too. Generic image code (fast_image_resize) is
+# compiled into it: scaling a frame for the agent takes ~520 ms at opt-level 0, ~6 ms at 1.
+[profile.dev]
+opt-level = 1
+
 # Frame encoding is ~10x slower unoptimised; keep debug builds usable.
 [profile.dev.package.jpeg-encoder]
 opt-level = 3
