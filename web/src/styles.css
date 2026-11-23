@@ -26,6 +26,10 @@
   line-height: 1.5;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  /* Phones: no font boosting of some blocks, no blue tap flash. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 *,
@@ -311,6 +315,7 @@ button {
 
 .input {
   flex: 1 1 auto;
+  width: 0; /* no intrinsic width (~20 characters): the row never gets wider than its box */
   min-width: 0;
   height: 36px;
   padding: 0 4px;
@@ -652,6 +657,7 @@ button {
 
 .page {
   height: 100%;
+  height: 100dvh; /* phones: the visible height, with the browser's bars and the keyboard */
   display: flex;
   flex-direction: column;
 }
@@ -661,7 +667,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 48px;
+  min-height: 48px;
   padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--border);
 }
@@ -792,7 +798,7 @@ button {
 .history-open {
   flex: 1 1 auto;
   min-width: 0;
-  height: 36px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -872,7 +878,7 @@ button {
 .page-composer {
   flex: none;
   display: flex;
-  height: var(--composer-h);
+  min-height: var(--composer-h); /* grows with enlarged text (phone font size settings) */
   margin: 0 16px 16px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -881,6 +887,7 @@ button {
 
 .page-composer .composer {
   flex: 1 1 auto;
+  min-width: 0;
 }
 
 @media (max-width: 480px) {
