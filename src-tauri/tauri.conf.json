@@ -10,6 +10,18 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"]
+    "publisher": "game-overlai",
+    "category": "Utility",
+    "shortDescription": "AI assistant overlay for any game",
+    "longDescription": "A hotkey opens a question field over the game; the AI agent (Claude Code or Codex) sees the game and answers in a chat that also opens in a browser and on a phone.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Russian", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
   }
 }

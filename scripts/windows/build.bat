@@ -1,5 +1,5 @@
 @echo off
-rem Builds a portable Windows executable into release\<version>\.
+rem Builds the installer and a portable executable into release\<version>\.
 rem Keep this file ASCII-only: cmd misreads non-ASCII text in batch files.
 setlocal
 cd /d "%~dp0..\.."
@@ -11,7 +11,7 @@ where cargo >nul 2>nul || goto :missing_rust
 for /f "usebackq delims=" %%v in (`node -p "require('./src-tauri/tauri.conf.json').version"`) do set "VERSION=%%v"
 if "%VERSION%"=="" goto :missing_version
 
-if not exist "web\node_modules\vite\bin\vite.js" (
+if not exist "web\node_modules\.bin\tauri.cmd" (
     echo Installing web dependencies...
     pushd web
     call npm ci --no-audit --no-fund || (popd & goto :error)
@@ -23,18 +23,21 @@ pushd web
 call npm run build || (popd & goto :error)
 popd
 
-echo Building game-overlai for Windows...
+echo Building game-overlai and its installer...
+rem The Tauri CLI builds the release exe and the NSIS installer (it downloads NSIS on first use).
 pushd src-tauri
-call cargo build --release || (popd & goto :error)
+call "..\web\node_modules\.bin\tauri.cmd" build || (popd & goto :error)
 popd
 
 set "OUT=release\%VERSION%"
 if not exist "%OUT%" mkdir "%OUT%" || goto :error
-copy /y "src-tauri\target\release\game-overlai.exe" "%OUT%\game-overlai-%VERSION%.exe" >nul || goto :error
+copy /y "src-tauri\target\release\game-overlai.exe" "%OUT%\game-overlai-%VERSION%-portable.exe" >nul || goto :error
+copy /y "src-tauri\target\release\bundle\nsis\game-overlai_%VERSION%_x64-setup.exe" "%OUT%\game-overlai-%VERSION%-setup.exe" >nul || goto :error
 
 echo.
 echo Done:
-echo   %OUT%\game-overlai-%VERSION%.exe
+echo   %OUT%\game-overlai-%VERSION%-setup.exe     installer, no admin rights needed
+echo   %OUT%\game-overlai-%VERSION%-portable.exe  portable
 call :pause_if_double_clicked
 exit /b 0
 
