@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { History, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { History, MessageSquare, Plus, Search, Trash2 } from "lucide-react";
+import { groupChats } from "./chatGroups";
 import type { ChatSummary } from "../api/generated/ChatSummary";
 import type { AgentStatus } from "../api/generated/AgentStatus";
 import type { Usage } from "../api/generated/Usage";
@@ -59,12 +60,6 @@ interface HeaderProps {
 
 export function ChatHeader({ title, usage, agent, chats, chatId, onNewChat, onOpenChat, onDeleteChat }: HeaderProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const groups = new Map<string, ChatSummary[]>();
-  for (const chat of chats) {
-    const game = chat.game?.title ?? "Без игры";
-    groups.set(game, [...(groups.get(game) ?? []), chat]);
-  }
-
   return (
     <div className="chat-header">
       <AgentDot agent={agent} />
@@ -82,44 +77,100 @@ export function ChatHeader({ title, usage, agent, chats, chatId, onNewChat, onOp
           <History size={16} />
         </button>
         {historyOpen && (
-          <div className="overlay-history-menu" role="region" aria-label="История чатов по играм">
-            {chats.length === 0 ? (
-              <div className="history-empty">Чаты появятся здесь</div>
-            ) : (
-              [...groups.entries()].map(([game, gameChats]) => (
-                <section className="history-group" key={game}>
-                  <h2>{game}</h2>
-                  {gameChats.map((chat) => (
-                    <div key={chat.id} className={`history-item${chatId === chat.id ? " active" : ""}`}>
-                      <button
-                        type="button"
-                        className="history-open"
-                        aria-pressed={chatId === chat.id}
-                        onClick={() => { onOpenChat(chat.id); setHistoryOpen(false); }}
-                      >
-                        <MessageSquare size={15} />
-                        <span className="history-item-text"><span className="history-item-title">{chat.title}</span></span>
-                      </button>
-                      <button
-                        type="button"
-                        className="history-delete"
-                        title="Удалить чат"
-                        aria-label={`Удалить чат ${chat.title}`}
-                        onClick={() => onDeleteChat(chat.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </section>
-              ))
-            )}
-          </div>
+          <HistoryMenu
+            chats={chats}
+            chatId={chatId}
+            onOpenChat={(id) => {
+              onOpenChat(id);
+              setHistoryOpen(false);
+            }}
+            onDeleteChat={onDeleteChat}
+            onClose={() => setHistoryOpen(false)}
+          />
         )}
       </div>
       <button type="button" className="icon-btn" onClick={onNewChat} title="Новый чат">
         <Plus size={16} />
       </button>
+    </div>
+  );
+}
+
+interface MenuProps {
+  chats: ChatSummary[];
+  chatId: string | null;
+  onOpenChat(id: string): void;
+  onDeleteChat(id: string): void;
+  onClose(): void;
+}
+
+/** History dropdown of the overlay panel: search, chats grouped by game. */
+function HistoryMenu({ chats, chatId, onOpenChat, onDeleteChat, onClose }: MenuProps) {
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const groups = useMemo(() => groupChats(chats, query), [chats, query]);
+
+  useEffect(() => {
+    // Esc closes the menu, not the panel (capture phase: the panel hides on Esc itself).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    // A click anywhere outside the menu (its toggle button included) closes it.
+    const onDown = (e: PointerEvent) => {
+      const menu = ref.current;
+      if (menu && !menu.parentElement?.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="overlay-history-menu" ref={ref} role="region" aria-label="История чатов по играм">
+      <label className="history-search overlay">
+        <Search size={14} aria-hidden />
+        <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по чатам" />
+      </label>
+      {groups.length === 0 ? (
+        <div className="history-empty">{chats.length ? "Ничего не найдено" : "Чаты появятся здесь"}</div>
+      ) : (
+        groups.map(([game, gameChats]) => (
+          <section className="history-group" key={game}>
+            <h2>{game}</h2>
+            {gameChats.map((chat) => (
+              <div key={chat.id} className={`history-item${chatId === chat.id ? " active" : ""}`}>
+                <button
+                  type="button"
+                  className="history-open"
+                  aria-pressed={chatId === chat.id}
+                  onClick={() => onOpenChat(chat.id)}
+                >
+                  <MessageSquare size={15} />
+                  <span className="history-item-text">
+                    <span className="history-item-title">{chat.title}</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="history-delete"
+                  title="Удалить чат"
+                  aria-label={`Удалить чат ${chat.title}`}
+                  onClick={() => onDeleteChat(chat.id)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </section>
+        ))
+      )}
     </div>
   );
 }

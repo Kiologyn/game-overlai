@@ -8,6 +8,7 @@ import { AgentDot, AgentNotice, UsageBadge } from "../components/ChatHeader";
 import { Composer } from "../components/Composer";
 import { MessageList } from "../components/MessageList";
 import { ShotViewerProvider } from "../components/Shots";
+import { groupChats } from "../components/chatGroups";
 
 const STATUS_TEXT = { open: "подключено", connecting: "подключение…", closed: "нет связи" } as const;
 
@@ -17,19 +18,7 @@ export function App({ conn }: { conn: Connection }) {
   const [query, setQuery] = useState("");
   const [screenshot, setScreenshot] = useStoredFlag("overlai.screenshot", true);
   const busy = isBusy(ui);
-  const visibleChats = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return ui.chats;
-    return ui.chats.filter((chat) => `${chat.title} ${chat.game?.title ?? ""}`.toLocaleLowerCase().includes(needle));
-  }, [query, ui.chats]);
-  const chatGroups = useMemo(() => {
-    const groups = new Map<string, typeof visibleChats>();
-    for (const chat of visibleChats) {
-      const name = chat.game?.title ?? "Без игры";
-      groups.set(name, [...(groups.get(name) ?? []), chat]);
-    }
-    return [...groups.entries()];
-  }, [visibleChats]);
+  const chatGroups = useMemo(() => groupChats(ui.chats, query), [query, ui.chats]);
 
   const submit = () => {
     const text = draft.trim();
@@ -66,7 +55,7 @@ export function App({ conn }: { conn: Connection }) {
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по чатам" />
             </label>
             <div className="history-list">
-              {visibleChats.length === 0 ? (
+              {chatGroups.length === 0 ? (
                 <div className="history-empty">{ui.chats.length ? "Ничего не найдено" : "Чаты появятся здесь"}</div>
               ) : chatGroups.map(([game, chats]) => (
                 <section className="history-group" key={game}>
