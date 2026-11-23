@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 
-pub use encode::encode;
+pub use encode::{agent_size, downscale, encode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {

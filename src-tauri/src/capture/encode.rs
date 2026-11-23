@@ -6,9 +6,46 @@
 //! `jpeg-encoder` (SIMD) takes BGRA as it comes from the GPU, so there is no conversion pass.
 //! Measured: 2560×1440 with heavy grain ~210 ms (debug build, the encoder itself is optimised).
 
+use fast_image_resize::images::{Image as ResizeImage, ImageRef};
+use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use jpeg_encoder::{ColorType, Encoder, SamplingFactor};
 
 use super::Frame;
+
+/// Longest side of a frame sent to the agent: Claude rejects images over 2000 px once a request
+/// has more than 20 of them (long chats with frames do), whatever `agent_max_height` says.
+pub const AGENT_MAX_SIDE: u32 = 2000;
+
+/// Size of the frame for the agent: at most `max_height` tall (0 = no limit) and
+/// `AGENT_MAX_SIDE` on either side, aspect ratio kept, never upscaled.
+pub fn agent_size(width: u32, height: u32, max_height: u32) -> (u32, u32) {
+    let mut scale = 1.0_f64;
+    if max_height > 0 && height > max_height {
+        scale = scale.min(max_height as f64 / height as f64);
+    }
+    let longest = width.max(height);
+    if longest > AGENT_MAX_SIDE {
+        scale = scale.min(AGENT_MAX_SIDE as f64 / longest as f64);
+    }
+    if scale >= 1.0 {
+        return (width, height);
+    }
+    let w = ((width as f64 * scale).round() as u32).clamp(1, AGENT_MAX_SIDE);
+    let h = ((height as f64 * scale).round() as u32).clamp(1, AGENT_MAX_SIDE);
+    (w, h)
+}
+
+/// The frame scaled to `width`×`height` (Lanczos: keeps small text readable).
+pub fn downscale(frame: &Frame, width: u32, height: u32) -> Result<Frame, String> {
+    let src = ImageRef::new(frame.width, frame.height, &frame.bgra, PixelType::U8x4)
+        .map_err(|e| format!("кадр: {e}"))?;
+    let mut dst = ResizeImage::new(width, height, PixelType::U8x4);
+    let options = ResizeOptions::new()
+        .resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3))
+        .use_alpha(false); // BGRA from the GPU is opaque
+    Resizer::new().resize(&src, &mut dst, &options).map_err(|e| format!("уменьшение кадра: {e}"))?;
+    Ok(Frame { width, height, bgra: dst.into_vec(), source: frame.source, taken: frame.taken })
+}
 
 /// Encoded bytes; base64 of this stays under 5 MB (5,242,880).
 pub const MAX_BYTES: usize = 3_800_000;
@@ -84,6 +121,28 @@ mod tests {
         let img = encode(&f).unwrap();
         assert!(img.bytes.len() <= MAX_BYTES, "{img:?}");
         assert_eq!((img.width, img.height), (2560, 1440));
+    }
+
+    #[test]
+    fn agent_sizes() {
+        assert_eq!(agent_size(2560, 1440, 720), (1280, 720));
+        assert_eq!(agent_size(3440, 1440, 720), (1720, 720)); // 21:9 keeps its shape
+        assert_eq!(agent_size(1280, 720, 720), (1280, 720)); // no upscaling or work
+        assert_eq!(agent_size(1024, 600, 720), (1024, 600));
+        assert_eq!(agent_size(5120, 1440, 720), (2000, 563)); // 32:9: the 2000 px API cap wins
+        assert_eq!(agent_size(2560, 1440, 0), (2000, 1125)); // "full" still respects the cap
+        assert_eq!(agent_size(1920, 1080, 0), (1920, 1080));
+    }
+
+    #[test]
+    fn downscale_keeps_colours() {
+        let f = frame(2560, 1440, |x, _| if x < 1280 { [200, 0, 0] } else { [0, 0, 200] });
+        let (w, h) = agent_size(f.width, f.height, 720);
+        let small = downscale(&f, w, h).unwrap();
+        assert_eq!((small.width, small.height, small.bgra.len()), (1280, 720, 1280 * 720 * 4));
+        let px = |x: usize, y: usize| &small.bgra[(y * 1280 + x) * 4..][..4];
+        assert_eq!(px(100, 300), [0, 0, 200, 255]); // BGRA: red
+        assert_eq!(px(1200, 300), [200, 0, 0, 255]); // blue
     }
 
     #[test]

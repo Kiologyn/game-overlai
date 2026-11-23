@@ -52,12 +52,15 @@ impl Overlai {
             Ok(s) => s,
             Err(reason) => return Ok(CallToolResult::error(vec![ContentBlock::text(format!("Could not encode the frame: {reason}"))])),
         };
-        info!("screenshot_game: {}x{} {}", stored.shot.width, stored.shot.height, stored.mime);
+        info!("screenshot_game: {}x{} sent as {}x{}", stored.shot.width, stored.shot.height, stored.sent_width, stored.sent_height);
         let game = state.overlay.lock().unwrap().game.clone();
         let mut note = match game {
             Some(g) => format!("Game window \"{}\" ({}), {}×{}", g.title, g.exe, stored.shot.width, stored.shot.height),
             None => format!("Game window, {}×{}", stored.shot.width, stored.shot.height),
         };
+        if (stored.sent_width, stored.sent_height) != (stored.shot.width, stored.shot.height) {
+            note.push_str(&format!(" (scaled to {}×{} for you)", stored.sent_width, stored.sent_height));
+        }
         if source == crate::capture::Source::Monitor {
             note.push_str(", whole monitor (the window itself could not be captured)");
         }

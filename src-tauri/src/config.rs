@@ -12,6 +12,21 @@ pub struct Config {
     pub hotkeys: Hotkeys,
     pub panel: PanelConfig,
     pub network: NetworkConfig,
+    pub capture: CaptureConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CaptureConfig {
+    /// Frames sent to the agent are scaled down to this height, keeping the aspect ratio
+    /// (720 = 720p; 0 = full resolution). Saved frames (thumbnails, full view) stay full size.
+    pub agent_max_height: u32,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self { agent_max_height: 720 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +78,7 @@ impl Default for Config {
             hotkeys: Hotkeys::default(),
             panel: PanelConfig::default(),
             network: NetworkConfig::default(),
+            capture: CaptureConfig::default(),
         }
     }
 }
@@ -156,6 +172,7 @@ mod tests {
         assert_eq!(partial.hotkeys.quick, "ctrl+space");
         assert_eq!(partial.hotkeys.chat, "alt+w");
         assert_eq!(partial.panel.width, 640.0);
+        assert_eq!(partial.capture.agent_max_height, 720);
         assert!(!partial.network.requires_proxy("claude"), "no proxy requirement by default");
         let strict: Config = toml::from_str("[network]\nrequire_proxy_for = [\"Claude\"]\n").unwrap();
         assert!(strict.network.requires_proxy("claude") && !strict.network.requires_proxy("codex"));

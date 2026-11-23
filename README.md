@@ -53,6 +53,8 @@ the chat in a browser is at http://127.0.0.1:47823/.
 - Settings: `%APPDATA%\game-overlai\config.toml` (created on first run; missing keys = defaults).
   `[network] proxy = "system"` takes the Windows proxy (incl. PAC), else HTTP(S)_PROXY, else direct;
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
+  `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,
+  0 = full; never over 2000 px a side); saved frames stay full size.
 - History: `%LOCALAPPDATA%\game-overlai\history.db` + `shots\` (frames, deleted with their chat).
 - Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).
 

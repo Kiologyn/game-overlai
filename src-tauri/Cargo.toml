@@ -34,6 +34,7 @@ rmcp = { version = "3.11.0", features = ["server", "macros", "transport-streamab
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 base64 = "0.23"
 rusqlite = { version = "0.43", features = ["bundled"] }
+fast_image_resize = "6.2.0"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg"] } # decode in tests
@@ -64,6 +65,10 @@ features = [
 
 # Frame encoding is ~10x slower unoptimised; keep debug builds usable.
 [profile.dev.package.jpeg-encoder]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+[profile.dev.package.fast_image_resize]
 opt-level = 3
 debug-assertions = false
 overflow-checks = false
