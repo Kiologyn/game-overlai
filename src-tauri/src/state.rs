@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tauri_plugin_global_shortcut::Shortcut;
 use tokio::sync::broadcast;
@@ -14,7 +14,11 @@ use crate::lan::Lan;
 use crate::protocol::{AgentState, AgentStatus, GameInfo, PanelMode, ServerMsg, Usage};
 
 pub struct AppState {
-    pub config: Config,
+    /// Current settings (the settings page changes them; some apply only after a restart).
+    pub config: RwLock<Config>,
+    /// The settings this run started with: agent, proxy and ports changed since need a restart.
+    pub started_with: Config,
+    pub config_file: std::path::PathBuf,
     /// Port the UI server actually listens on (config.port, or a free one if that was taken).
     pub port: u16,
     /// Base URL the overlay window loads the UI from (the core itself, or the Vite dev server).
@@ -26,7 +30,7 @@ pub struct AppState {
     pub hub: Hub,
     pub chat: Mutex<ChatState>,
     pub overlay: Mutex<OverlayState>,
-    pub hotkeys: HotkeySet,
+    pub hotkeys: Mutex<HotkeySet>,
     pub hotkeys_paused: AtomicBool,
     pub agent: AgentHandle,
     /// Our MCP server as offered to the agent (the `/mcp` route checks its token).
@@ -41,8 +45,10 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Config,
+        config_file: std::path::PathBuf,
         port: u16,
         ui_base: String,
         profiles_dir: std::path::PathBuf,
@@ -50,7 +56,7 @@ impl AppState {
         agent: AgentHandle,
         mcp: McpEndpoint,
     ) -> Self {
-        let hotkeys = HotkeySet::parse(&config);
+        let hotkeys = HotkeySet::parse(&config.hotkeys);
         let agent_status = AgentStatus { agent: agent.spec.name.into(), state: AgentState::Starting, detail: None };
         let history = History::open(&history_dir);
         let lan = Lan::load(&history_dir, config.lan.port);
@@ -60,7 +66,9 @@ impl AppState {
             .map(|stored| ChatState::from_stored(stored, agent.spec.id))
             .unwrap_or_else(|| ChatState::empty(None));
         Self {
-            config,
+            started_with: config.clone(),
+            config: RwLock::new(config),
+            config_file,
             port,
             ui_base,
             profiles_dir,
@@ -69,7 +77,7 @@ impl AppState {
             hub: Hub::new(),
             chat: Mutex::new(chat),
             overlay: Mutex::new(OverlayState::default()),
-            hotkeys,
+            hotkeys: Mutex::new(hotkeys),
             hotkeys_paused: AtomicBool::new(false),
             agent,
             mcp,
@@ -79,6 +87,11 @@ impl AppState {
             failed_hotkeys: Mutex::new(Vec::new()),
             app: std::sync::OnceLock::new(),
         }
+    }
+
+    /// A copy of the current settings.
+    pub fn cfg(&self) -> Config {
+        self.config.read().unwrap().clone()
     }
 
     /// Address for opening the chat in a browser on this PC.
@@ -118,7 +131,7 @@ pub struct HotkeySet {
 }
 
 impl HotkeySet {
-    fn parse(cfg: &Config) -> Self {
+    pub fn parse(keys: &crate::config::Hotkeys) -> Self {
         let parse = |name: &str, s: &str| match s.parse::<Shortcut>() {
             Ok(sc) => Some(sc),
             Err(e) => {
@@ -126,7 +139,7 @@ impl HotkeySet {
                 None
             }
         };
-        Self { quick: parse("quick", &cfg.hotkeys.quick), chat: parse("chat", &cfg.hotkeys.chat) }
+        Self { quick: parse("quick", &keys.quick), chat: parse("chat", &keys.chat) }
     }
 }
 

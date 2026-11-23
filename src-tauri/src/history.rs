@@ -393,6 +393,10 @@ impl History {
         })
     }
 
+    pub fn clear_panel_layouts(&self) {
+        self.write("clear panel layouts", |db| db.execute("DELETE FROM panel_layouts", []).map(drop));
+    }
+
     pub fn save_panel_layout(&self, game_exe: &str, l: &PanelLayout) {
         self.write("save panel layout", |db| {
             db.execute(
@@ -556,6 +560,8 @@ mod tests {
         h.save_panel_layout("CS2.EXE", &PanelLayout { width: 600.0, ..l }); // same game
         assert_eq!(h.panel_layout("cs2.exe").map(|l| l.width), Some(600.0));
         assert_eq!(h.panel_layout(""), None);
+        h.clear_panel_layouts();
+        assert_eq!(h.panel_layout("cs2.exe"), None);
     }
 
     #[test]

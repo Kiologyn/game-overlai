@@ -9,11 +9,28 @@ use tracing::{info, warn};
 pub struct Config {
     /// Local port of the UI/WebSocket server (the chat also opens in a browser on this port).
     pub port: u16,
+    /// Agent id: "claude" or "codex".
+    pub agent: String,
     pub hotkeys: Hotkeys,
     pub panel: PanelConfig,
     pub network: NetworkConfig,
     pub capture: CaptureConfig,
     pub lan: LanConfig,
+    pub notifications: NotificationsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationsConfig {
+    /// A Windows notification when an answer to a question asked in the overlay is ready (or
+    /// the agent waits for a permission) while the panel is hidden.
+    pub enabled: bool,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +84,7 @@ impl NetworkConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Hotkeys {
     /// Quick question field: sending from it starts a new chat.
@@ -90,11 +107,13 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             port: 47823,
+            agent: "claude".into(),
             hotkeys: Hotkeys::default(),
             panel: PanelConfig::default(),
             network: NetworkConfig::default(),
             capture: CaptureConfig::default(),
             lan: LanConfig::default(),
+            notifications: NotificationsConfig::default(),
         }
     }
 }
@@ -190,6 +209,8 @@ mod tests {
         assert_eq!(partial.panel.width, 640.0);
         assert_eq!(partial.capture.agent_max_height, 720);
         assert_eq!(partial.lan.port, 47824);
+        assert_eq!(partial.agent, "claude");
+        assert!(partial.notifications.enabled);
         assert!(!partial.network.requires_proxy("claude"), "no proxy requirement by default");
         let strict: Config = toml::from_str("[network]\nrequire_proxy_for = [\"Claude\"]\n").unwrap();
         assert!(strict.network.requires_proxy("claude") && !strict.network.requires_proxy("codex"));

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { connect } from "./api/connection";
 import { App } from "./app/App";
 import { PhonePage } from "./app/PhonePage";
+import { SettingsPage } from "./app/SettingsPage";
 import { Panel } from "./panel/Panel";
 import "./styles.css";
 
@@ -15,6 +16,8 @@ const page = isPanel ? (
   <Panel conn={conn} />
 ) : location.pathname.startsWith("/phone") ? (
   <PhonePage conn={conn} />
+) : location.pathname.startsWith("/settings") ? (
+  <SettingsPage conn={conn} />
 ) : (
   <App conn={conn} />
 );

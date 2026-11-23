@@ -1528,3 +1528,177 @@ html[data-surface="overlay"] .shot-viewer {
   flex-direction: column;
   gap: 6px;
 }
+
+/* ------------------------------------------------------------------ /settings page (on the PC) */
+
+.settings-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-page h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-form section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.settings-form h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+}
+
+.settings-row > span:first-child {
+  flex: 0 0 170px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.settings-form :is(input[type="number"], input:not([type]), select) {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.settings-form input:not([type]) {
+  flex: 1 1 220px;
+}
+
+.settings-form input[type="number"] {
+  width: 96px;
+}
+
+.settings-form :is(input, select):focus {
+  border-color: var(--muted);
+}
+
+.settings-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.settings-choices {
+  display: flex;
+  gap: 20px;
+}
+
+.settings-choice,
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-form input[type="radio"],
+.settings-form input[type="checkbox"] {
+  accent-color: var(--text-2);
+  width: 15px;
+  height: 15px;
+}
+
+.hotkey-input {
+  min-width: 160px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hotkey-input.recording {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.settings-warn {
+  margin: 0;
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.settings-error {
+  color: var(--bad);
+  font-size: 13px;
+}
+
+.settings-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.settings-banner .btn,
+.settings-form .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 0;
+  background: var(--bg);
+}
+
+.settings-about {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.settings-page a {
+  color: var(--text);
+}

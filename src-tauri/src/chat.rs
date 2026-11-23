@@ -42,6 +42,9 @@ pub struct ChatState {
     session_profile: Option<u64>,
     /// The assistant message being streamed.
     active: Option<String>,
+    /// That question was asked in the overlay: tell the user when the answer is ready (or the
+    /// agent asks for a permission) if they hid the panel meanwhile.
+    notify: bool,
     pub permissions: Vec<PermissionPrompt>,
     /// Frame the agent's screenshot tool took before its tool call reached us.
     pending_tool_shot: Option<Shot>,
@@ -63,6 +66,7 @@ impl ChatState {
             session_generation: None,
             session_profile: None,
             active: None,
+            notify: false,
             permissions: vec![],
             pending_tool_shot: None,
             epoch: 0,
@@ -224,7 +228,7 @@ pub fn follow_game(state: &Arc<AppState>, game: &GameInfo) {
     }
 }
 
-pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool) {
+pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool, from_overlay: bool) {
     let text = text.trim().to_string();
     if text.is_empty() {
         return;
@@ -273,6 +277,7 @@ pub fn send(state: &Arc<AppState>, text: &str, screenshot: bool, new_chat: bool)
         chat.save(state, &user.id);
         chat.save(state, &reply.id);
         chat.active = Some(reply.id.clone());
+        chat.notify = from_overlay;
         chat.flushed = Instant::now();
         (chat.id.clone(), chat.epoch, started_new)
     };
@@ -367,11 +372,23 @@ async fn run_turn(state: Arc<AppState>, turn: Turn) {
         return; // another chat became current meanwhile (the answer was saved then)
     }
     chat.active = None;
+    let mut answer = String::new();
     if let Some(m) = chat.message_mut(&message_id) {
         m.status = status;
         m.error = error.clone();
+        answer = m.parts.iter().filter_map(|p| match p {
+            Part::Text { text } => Some(text.as_str()),
+            _ => None,
+        }).collect();
     }
     chat.save(&state, &message_id);
+    if std::mem::take(&mut chat.notify) {
+        match (status, &error) {
+            (MessageStatus::Done, _) => crate::notify::answer_ready(&state, chat.title.as_deref(), &answer),
+            (MessageStatus::Error, Some(e)) => crate::notify::answer_failed(&state, e),
+            _ => {}
+        }
+    }
     state.hub.send(Target::All, ServerMsg::ChatStatus { message_id, status, error });
 }
 
@@ -680,6 +697,9 @@ fn handle_event(state: &Arc<AppState>, event: AgentEvent) {
         AgentEvent::PermissionRequested { session_id, prompt } => {
             let mut chat = state.chat.lock().unwrap();
             if chat.session_id.as_deref() == Some(&session_id) {
+                if chat.notify {
+                    crate::notify::permission(state, &prompt.title);
+                }
                 chat.permissions.push(prompt);
                 state.hub.send(Target::All, ServerMsg::Permissions { prompts: chat.permissions.clone() });
             } else {

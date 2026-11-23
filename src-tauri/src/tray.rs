@@ -1,5 +1,5 @@
 //! Tray icon: left click opens the chat, right click shows the menu.
-//! Later phases add: agent choice, settings, autostart.
+//! Settings (hotkeys, agent, proxy, autostart...) are on the /settings page in the browser.
 
 use std::sync::{Arc, OnceLock};
 
@@ -20,14 +20,24 @@ pub const TRAY_ID: &str = "main";
 
 /// "Access from the phone" item: kept in sync when access is changed on the /phone page.
 static LAN_ITEM: OnceLock<CheckMenuItem<tauri::Wry>> = OnceLock::new();
+/// Items that show the hotkeys (renamed when the settings change them).
+static HOTKEY_ITEMS: OnceLock<(MenuItem<tauri::Wry>, MenuItem<tauri::Wry>)> = OnceLock::new();
+
+fn quick_text(key: &str) -> String {
+    format!("Быстрый вопрос\t{}", pretty_hotkey(key))
+}
+
+fn chat_text(key: &str) -> String {
+    format!("Открыть чат\t{}", pretty_hotkey(key))
+}
 
 pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let st = app.state::<Arc<AppState>>().inner().clone();
-    let quick_key = pretty_hotkey(&st.config.hotkeys.quick);
-    let chat_key = pretty_hotkey(&st.config.hotkeys.chat);
-
-    let quick = MenuItem::with_id(app, "quick", format!("Быстрый вопрос\t{quick_key}"), true, None::<&str>)?;
-    let chat = MenuItem::with_id(app, "chat", format!("Открыть чат\t{chat_key}"), true, None::<&str>)?;
+    let keys = st.cfg().hotkeys;
+    let quick = MenuItem::with_id(app, "quick", quick_text(&keys.quick), true, None::<&str>)?;
+    let chat = MenuItem::with_id(app, "chat", chat_text(&keys.chat), true, None::<&str>)?;
+    let _ = HOTKEY_ITEMS.set((quick.clone(), chat.clone()));
+    let settings = MenuItem::with_id(app, "settings", "Настройки…", true, None::<&str>)?;
     let browser = MenuItem::with_id(app, "browser", "Открыть чат в браузере", true, None::<&str>)?;
     let lan_on = CheckMenuItem::with_id(app, "lan", "Доступ с телефона (Wi-Fi)", true, lan::enabled(&st), None::<&str>)?;
     let phone = MenuItem::with_id(app, "phone", "Телефон: QR-код…", true, None::<&str>)?;
@@ -44,6 +54,7 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
             &phone,
             &PredefinedMenuItem::separator(app)?,
             &pause,
+            &settings,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -70,10 +81,10 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
                 }
             }
             "phone" => open_phone_page(app),
+            "settings" => open_page(app, "settings"),
             "pause" => {
                 let paused = pause_item.is_checked().unwrap_or(false);
                 hotkeys::set_paused(app, paused);
-                refresh_tooltip(app);
             }
             "quit" => app.exit(0),
             _ => {}
@@ -109,11 +120,8 @@ fn tooltip(st: &AppState) -> String {
     } else {
         let failed = st.failed_hotkeys.lock().unwrap();
         if failed.is_empty() {
-            lines.push(format!(
-                "{} вопрос · {} чат",
-                pretty_hotkey(&st.config.hotkeys.quick),
-                pretty_hotkey(&st.config.hotkeys.chat)
-            ));
+            let keys = st.cfg().hotkeys;
+            lines.push(format!("{} вопрос · {} чат", pretty_hotkey(&keys.quick), pretty_hotkey(&keys.chat)));
         } else {
             lines.push(format!("Заняты: {}", failed.join(", ")));
         }
@@ -138,8 +146,26 @@ pub fn open_in_browser(app: &AppHandle) {
 
 /// The /phone page on this PC: QR code, addresses, access on/off.
 pub fn open_phone_page(app: &AppHandle) {
-    let url = format!("{}phone", app.state::<Arc<AppState>>().browser_url());
+    open_page(app, "phone");
+}
+
+/// A page of the browser UI on this PC, e.g. "settings".
+pub fn open_page(app: &AppHandle, page: &str) {
+    let url = format!("{}{page}", app.state::<Arc<AppState>>().browser_url());
     open_url(app, &url);
+}
+
+/// Hotkeys changed in the settings (or were paused): menu labels and tooltip.
+pub fn refresh_hotkeys(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let keys = handle.state::<Arc<AppState>>().cfg().hotkeys;
+        if let Some((quick, chat)) = HOTKEY_ITEMS.get() {
+            let _ = quick.set_text(quick_text(&keys.quick));
+            let _ = chat.set_text(chat_text(&keys.chat));
+        }
+        refresh_tooltip(&handle);
+    });
 }
 
 fn open_url(app: &AppHandle, url: &str) {

@@ -33,8 +33,6 @@ pub const CLAUDE: AgentSpec = AgentSpec {
     login_hint: "Войдите в Claude Code: откройте терминал, выполните `claude` и команду `/login`.",
 };
 
-/// Not used by default; kept working for when the agent becomes selectable (phase 9).
-#[allow(dead_code)]
 pub const CODEX: AgentSpec = AgentSpec {
     id: "codex",
     name: "Codex",
@@ -45,6 +43,14 @@ pub const CODEX: AgentSpec = AgentSpec {
     system_prompt_mode: SystemPromptMode::Append,
     login_hint: "Войдите в Codex в терминале командой `codex login`, затем перезапустите приложение.",
 };
+
+/// Agents the user can choose in the settings.
+pub const ALL: [&AgentSpec; 2] = [&CLAUDE, &CODEX];
+
+/// The spec for a configured agent id (Claude if unknown).
+pub fn by_id(id: &str) -> &'static AgentSpec {
+    ALL.into_iter().find(|s| s.id.eq_ignore_ascii_case(id.trim())).unwrap_or(&CLAUDE)
+}
 
 /// "Lean" Claude Code session (measured in phase 0: ~3K instead of ~41K tokens per question,
 /// first token ~1.3 s instead of ~2.8 s): don't load the user's global settings, plugins,

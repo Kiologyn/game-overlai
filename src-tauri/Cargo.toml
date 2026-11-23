@@ -38,6 +38,7 @@ fast_image_resize = "6.2.0"
 tauri-runtime = "=2.12.4"
 qrcode = { version = "0.15.0", default-features = false, features = ["svg"] }
 local-ip-address = "0.6.13"
+tauri-plugin-notification = "2.8.1"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg"] } # decode in tests
@@ -58,6 +59,8 @@ features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_Networking_WinHttp",
+    "Win32_Security",
+    "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_System_WinRT",
     "Win32_System_WinRT_Direct3D11",

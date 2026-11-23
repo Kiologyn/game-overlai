@@ -4,13 +4,13 @@ use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::Ctx;
 use crate::protocol::{ClientKind, ClientMsg, ServerMsg};
 use crate::state::Target;
 use crate::history::ProfileEdit;
-use crate::{chat, games, lan, overlay};
+use crate::{chat, games, lan, overlay, settings};
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -43,6 +43,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
     ];
     if !ctx.lan {
         initial.push(lan::status(&ctx.state));
+        initial.push(settings::snapshot(&ctx.state));
     }
     if let Some(usage) = ctx.state.usage.lock().unwrap().clone() {
         initial.push(ServerMsg::AgentUsage { usage });
@@ -129,7 +130,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             if ctx.lan {
                 overlay::adopt_foreground_game(&ctx.state);
             }
-            chat::send(&ctx.state, &text, screenshot, new_chat)
+            chat::send(&ctx.state, &text, screenshot, new_chat, kind == ClientKind::Overlay)
         }
         ClientMsg::ChatCancel => chat::cancel(&ctx.state),
         ClientMsg::ChatNew => chat::new_chat(&ctx.state),
@@ -140,11 +141,30 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         }
         ClientMsg::PermissionRespond { id, option_id } => chat::respond_permission(&ctx.state, &id, option_id),
         // This PC's UI only: devices on the network can't change access or open things on the PC.
-        ClientMsg::LanSet { .. } | ClientMsg::LanResetToken | ClientMsg::UiOpenUrl { .. } if ctx.lan => {
+        ClientMsg::LanSet { .. }
+        | ClientMsg::LanResetToken
+        | ClientMsg::UiOpenUrl { .. }
+        | ClientMsg::SettingsSave { .. }
+        | ClientMsg::SettingsAutostart { .. }
+        | ClientMsg::SettingsCapturing { .. }
+        | ClientMsg::SettingsResetPanelPlaces
+        | ClientMsg::AppRestart
+            if ctx.lan =>
+        {
             warn!("LAN device sent a local-only message: ignored");
         }
         ClientMsg::LanSet { enabled } => lan::set_enabled(&ctx.state, enabled),
         ClientMsg::LanResetToken => lan::reset_token(&ctx.state),
+        ClientMsg::SettingsSave { values } => settings::save(&ctx.state, values),
+        ClientMsg::SettingsAutostart { enabled } => settings::set_autostart(&ctx.state, enabled),
+        ClientMsg::SettingsCapturing { active } => {
+            overlay::run_on_main(&ctx.app, move |app| crate::hotkeys::set_capturing(app, active))
+        }
+        ClientMsg::SettingsResetPanelPlaces => {
+            ctx.state.history.clear_panel_layouts();
+            info!("panel places forgotten");
+        }
+        ClientMsg::AppRestart => settings::restart(&ctx.state),
         ClientMsg::UiOpenUrl { url } => {
             if url.starts_with("https://") || url.starts_with("http://") {
                 use tauri_plugin_opener::OpenerExt;

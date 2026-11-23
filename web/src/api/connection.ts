@@ -10,6 +10,7 @@ import type { ClientMsg } from "./generated/ClientMsg";
 import type { GameInfo } from "./generated/GameInfo";
 import type { GameProfile } from "./generated/GameProfile";
 import type { LanStatus } from "./generated/LanStatus";
+import type { Settings } from "./generated/Settings";
 import { sameExe } from "./games";
 import type { PanelMode } from "./generated/PanelMode";
 import type { PermissionPrompt } from "./generated/PermissionPrompt";
@@ -35,6 +36,8 @@ export interface UiState {
   usage: Usage | null;
   /** Phone access over the local network; only this PC's UI gets it. */
   lan: LanStatus | null;
+  /** Settings page state; only this PC's UI gets it. */
+  settings: Settings | null;
   overlay: {
     visible: boolean;
     mode: PanelMode;
@@ -62,6 +65,7 @@ const initial: UiState = {
   agent: null,
   usage: null,
   lan: null,
+  settings: null,
   overlay: { visible: false, mode: "compact", game: null, showSeq: 0 },
 };
 
@@ -142,6 +146,8 @@ function reduce(s: UiState, msg: ServerMsg): UiState {
       };
     case "lan.status":
       return { ...s, lan: msg.status };
+    case "settings":
+      return { ...s, settings: msg.settings };
     case "overlay.hidden":
       return { ...s, overlay: { ...s.overlay, visible: false } };
   }

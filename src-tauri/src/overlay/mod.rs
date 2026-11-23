@@ -57,7 +57,7 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
         .resizable(false)
         .visible(false)
         .focused(false)
-        .inner_size(state.config.panel.width, COMPACT_H)
+        .inner_size(state.config.read().unwrap().panel.width, COMPACT_H)
         .build()?;
 
     let hwnd = panel_hwnd(&window);
@@ -257,7 +257,7 @@ fn place(st: &AppState, window: &WebviewWindow, mode: PanelMode, game_hwnd: isiz
     let game = win32::hwnd(game_hwnd);
     let (b, scale) = win32::panel_bounds(win32::is_alive(game).then_some(game));
     let saved = st.history.panel_layout(&layout_key(st));
-    let cfg = &st.config.panel;
+    let cfg = st.config.read().unwrap().panel.clone();
     let (bw, bh) = (b.right - b.left, b.bottom - b.top);
     let px = |v: f64| (v * scale).round() as i32;
     let (min_w, min_h) = (px(MIN_W).min(bw), px(MIN_H).min(bh));
@@ -348,7 +348,7 @@ fn save_layout(app: &AppHandle) {
     let height = match mode {
         PanelMode::Expanded => ph as f64 / scale,
         // The compact panel only changes width: keep the expanded height.
-        PanelMode::Compact => st.history.panel_layout(&key).map_or(st.config.panel.expanded_height, |l| l.height),
+        PanelMode::Compact => st.history.panel_layout(&key).map_or(st.config.read().unwrap().panel.expanded_height, |l| l.height),
     };
     let layout = PanelLayout {
         width: pw as f64 / scale,

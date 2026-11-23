@@ -9,6 +9,8 @@ mod games;
 mod hotkeys;
 mod history;
 mod lan;
+mod notify;
+mod settings;
 mod logging;
 mod mcp;
 mod overlay;
@@ -56,7 +58,10 @@ fn main() {
     };
     // The agent starts right away (install on first run, then a warm process).
     let (agent_events, agent_events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let spec = &agent::spec::CLAUDE;
+    let spec = agent::spec::by_id(&config.agent);
+    if std::env::args().any(|a| a == "--autostart") {
+        info!("started with Windows");
+    }
     let agent = agent::AgentHandle::start(
         spec,
         paths.agents_dir.clone(),
@@ -67,6 +72,7 @@ fn main() {
     );
     let state = Arc::new(AppState::new(
         config,
+        paths.config_file.clone(),
         port,
         ui_base,
         paths.profiles_dir.clone(),
@@ -82,6 +88,7 @@ fn main() {
             overlay::show(app, PanelMode::Expanded, ShowSource::Other);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(hotkeys::plugin())
         .manage(state.clone())
         .setup(move |app| {
@@ -92,8 +99,10 @@ fn main() {
             *state.failed_hotkeys.lock().unwrap() = hotkeys::register(&handle);
             tray::build(app)?;
             lan::start_if_enabled(&state);
+            notify::register_app_id();
             debug_show_on_start(&handle);
-            info!("ready: {} = quick question, {} = chat", state.config.hotkeys.quick, state.config.hotkeys.chat);
+            let keys = state.cfg().hotkeys;
+            info!("ready: {} = quick question, {} = chat", keys.quick, keys.chat);
             Ok(())
         })
         .build(tauri::generate_context!());

@@ -285,6 +285,63 @@ pub struct LanStatus {
     pub error: Option<String>,
 }
 
+// ------------------------------------------------------------------ settings
+
+/// What the settings page edits (saved to config.toml).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SettingsValues {
+    /// e.g. "alt+q"
+    pub hotkey_quick: String,
+    pub hotkey_chat: String,
+    /// "claude" | "codex"
+    pub agent: String,
+    /// "system" | "none" | "http://host:port"
+    pub proxy: String,
+    /// Agent ids that must not connect without a proxy.
+    pub require_proxy_for: Vec<String>,
+    /// Default panel size (logical px) for games the user hasn't placed it over yet.
+    pub panel_width: f64,
+    pub panel_height: f64,
+    /// Height of frames sent to the agent (0 = full).
+    pub agent_max_height: u32,
+    pub lan_port: u16,
+    pub notifications: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AgentChoice {
+    pub id: String,
+    pub name: String,
+    /// How to sign in to it (shown under the choice).
+    pub login_hint: String,
+}
+
+/// The settings page's state (this PC's UI only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Settings {
+    pub values: SettingsValues,
+    pub agents: Vec<AgentChoice>,
+    /// Saved changes that take effect after a restart (agent, proxy, ports).
+    pub restart_needed: bool,
+    /// Hotkeys another program holds.
+    pub hotkeys_taken: Vec<String>,
+    /// Starts with Windows (this exe).
+    pub autostart: bool,
+    /// Autostart points at another copy of the app (e.g. an older build): its path.
+    pub autostart_other: Option<String>,
+    pub version: String,
+    pub config_file: String,
+    pub data_dir: String,
+    /// The last save was refused: why.
+    pub error: Option<String>,
+}
+
 // ------------------------------------------------------------------ messages
 
 /// UI -> core.
@@ -341,6 +398,21 @@ pub enum ClientMsg {
     /// New access token: devices signed in so far are logged out (this PC's UI only).
     #[serde(rename = "lan.resetToken")]
     LanResetToken,
+    /// Save the settings (this PC's UI only).
+    #[serde(rename = "settings.save")]
+    SettingsSave { values: SettingsValues },
+    #[serde(rename = "settings.autostart")]
+    SettingsAutostart { enabled: bool },
+    /// The settings page records a hotkey: global hotkeys are off meanwhile, so pressing the
+    /// current one doesn't open the panel.
+    #[serde(rename = "settings.capturing")]
+    SettingsCapturing { active: bool },
+    /// Forget where the panel was placed over each game.
+    #[serde(rename = "settings.resetPanelPlaces")]
+    SettingsResetPanelPlaces,
+    /// Restart the app (applies agent/proxy/port changes).
+    #[serde(rename = "app.restart")]
+    AppRestart,
     /// Open an http(s) link in the default browser (links must not navigate the overlay).
     #[serde(rename = "ui.openUrl")]
     UiOpenUrl { url: String },
@@ -401,6 +473,9 @@ pub enum ServerMsg {
     /// Phone access over the local network (this PC's UI only: it carries the token).
     #[serde(rename = "lan.status")]
     LanStatus { status: LanStatus },
+    /// Settings page state (this PC's UI only).
+    #[serde(rename = "settings")]
+    Settings { settings: Settings },
 }
 
 #[cfg(test)]

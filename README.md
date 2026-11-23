@@ -13,7 +13,7 @@ tools via winget.
 
 ```powershell
 scripts\windows\dev.bat      # Vite with hot reload + the app, in one console
-scripts\windows\build.bat    # portable release exe -> release\<version>\
+scripts\windows\build.bat    # installer (per user, no admin) + portable exe -> release\<version>\
 ```
 
 By hand: `cd web; npm install; npm run build`, then `cd src-tauri; cargo run`. On first start the app
@@ -23,6 +23,10 @@ Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel
 `Esc` / ✕ — hide. The panel moves by its header (grip in the compact field) and resizes by its
 edges, always inside the game window; its place is remembered per game. 📷 in the input field attaches a frame of the game. The tray icon has the rest;
 the chat in a browser is at http://127.0.0.1:47823/.
+
+Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys, agent (Claude Code or Codex),
+proxy, default panel size, frame size for the agent, phone port, notifications, start with Windows.
+Hotkeys and most values apply at once; the agent, proxy and ports after the restart the page offers.
 
 Game profiles: a game's name in the browser's chat list (or the game chip in the overlay) opens its page —
 its name for the agent, standing instructions (spoilers, character, language...), sites to search first,
@@ -50,7 +54,8 @@ phone takes the window in the foreground on the PC as the game (and 📷 capture
 | `src-tauri/src/lan.rs` | phone access: on/off, token, addresses, QR codes |
 | `src-tauri/src/protocol.rs` | WebSocket protocol; TS types are generated from it |
 | `src-tauri/src/proxy.rs`, `config.rs`, `tray.rs`, `hotkeys.rs` | network proxy, settings, tray, global hotkeys |
-| `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/` = browser chat |
+| `src-tauri/src/settings.rs`, `notify.rs` | backend of the settings page, start with Windows; notifications |
+| `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/` = browser chat, `/phone`, `/settings` |
 | `spikes/` | phase 0 prototypes (ACP, capture, overlay), kept for reference |
 
 ## Conventions
@@ -64,7 +69,10 @@ phone takes the window in the foreground on the PC as the game (and 📷 capture
 
 ## Runtime files
 
-- Settings: `%APPDATA%\game-overlai\config.toml` (created on first run; missing keys = defaults).
+- Settings: `%APPDATA%\game-overlai\config.toml` (created on first run; missing keys = defaults; the settings
+  page rewrites it). `agent = "claude"` or `"codex"`; `[notifications] enabled` — a Windows notification when
+  an answer to a question from the overlay is ready (or the agent asks for a permission) while the panel is
+  hidden. Start with Windows = the `game-overlai` value under `HKCU\...\CurrentVersion\Run`.
   `[network] proxy = "system"` takes the Windows proxy (incl. PAC), else HTTP(S)_PROXY, else direct;
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
   `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,

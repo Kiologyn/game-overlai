@@ -77,7 +77,7 @@ pub struct Stored {
 pub async fn store(state: &AppState, chat_id: &str, frame: Arc<Frame>) -> Result<Stored, String> {
     let started = std::time::Instant::now();
     let shot = Shot { id: uuid::Uuid::new_v4().simple().to_string(), width: frame.width, height: frame.height };
-    let (sent_width, sent_height) = capture::agent_size(frame.width, frame.height, state.config.capture.agent_max_height);
+    let (sent_width, sent_height) = capture::agent_size(frame.width, frame.height, state.config.read().unwrap().capture.agent_max_height);
 
     let for_agent = tauri::async_runtime::spawn_blocking({
         let frame = frame.clone();
