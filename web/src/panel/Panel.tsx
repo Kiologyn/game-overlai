@@ -64,11 +64,15 @@ export function Panel({ conn }: { conn: Connection }) {
       zoom(wheel < 0 ? "in" : "out");
       wheel = 0;
     };
+    // No WebView2 context menu (Back, Reload, Print, Save as...) on the overlay.
+    const noMenu = (e: MouseEvent) => e.preventDefault();
     window.addEventListener("keydown", onKey);
     window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("contextmenu", noMenu);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("contextmenu", noMenu);
     };
   }, [conn]);
 
