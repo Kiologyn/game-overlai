@@ -1,0 +1,17 @@
+[package]
+name = "overlay-probe"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8"
+serde = "1.0.229"
+serde_json = "1.0.154"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Diagnostics_Debug"] }
+
+[build-dependencies]
+tauri-build = "2"
