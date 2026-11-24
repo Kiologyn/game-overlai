@@ -462,11 +462,19 @@ fn parse_usage(v: &Value) -> Option<Usage> {
 }
 
 /// "mcp__overlai__screenshot_game" -> "screenshot_game"; other titles unchanged.
+/// MCP tools come as "mcp__server__tool" (Claude Code) or "mcp.server.tool" (Codex): the bare
+/// tool name, as the UI and the chat (frames on image tools) know them.
 fn tool_title(title: &str) -> String {
-    match title.strip_prefix("mcp__") {
-        Some(rest) => rest.split_once("__").map(|(_, tool)| tool).unwrap_or(rest).to_string(),
-        None => title.to_string(),
+    if let Some(rest) = title.strip_prefix("mcp__") {
+        return rest.split_once("__").map(|(_, tool)| tool).unwrap_or(rest).to_string();
     }
+    if let Some(rest) = title.strip_prefix("mcp.")
+        && let Some((_, tool)) = rest.split_once('.')
+        && !tool.contains(char::is_whitespace)
+    {
+        return tool.to_string();
+    }
+    title.to_string()
 }
 
 fn tool_kind(kind: &ToolKind) -> String {
@@ -534,6 +542,7 @@ mod tests {
     #[test]
     fn tool_titles() {
         assert_eq!(tool_title("mcp__overlai__screenshot_game"), "screenshot_game");
+        assert_eq!(tool_title("mcp.overlai.zoom_screen"), "zoom_screen");
         assert_eq!(tool_title("Web search"), "Web search");
     }
 }
