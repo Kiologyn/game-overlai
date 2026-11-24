@@ -1,10 +1,11 @@
 // A game's page in the browser chat: its profile (what the agent is told about the game) and
 // its chats. The profile applies to the game's chats from their next question.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import type { ChatSummary } from "../api/generated/ChatSummary";
 import type { GameProfile } from "../api/generated/GameProfile";
+import { htmlLang, useLanguage, useT } from "../i18n";
 
 interface Props {
   profile: GameProfile;
@@ -32,9 +33,13 @@ const sameForm = (a: Form, b: Form) =>
   a.instructions.trim() === b.instructions.trim() &&
   a.sources.trim() === b.sources.trim();
 
-const DATE = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-
 export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack }: Props) {
+  const t = useT();
+  const language = useLanguage();
+  const date = useMemo(
+    () => new Intl.DateTimeFormat(htmlLang(language), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+    [language],
+  );
   const saved = toForm(profile);
   const [form, setForm] = useState<Form>(saved);
   const dirty = !sameForm(form, saved);
@@ -65,14 +70,14 @@ export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack }:
   return (
     <div className="game-page">
       <div className="game-page-head">
-        <button type="button" className="icon-btn" onClick={onBack} title="К чату">
+        <button type="button" className="icon-btn" onClick={onBack} title={t("back_to_chat")}>
           <ArrowLeft size={16} />
         </button>
         <div className="game-page-title">
           <h1>{title}</h1>
           <span>
             {profile.exe}
-            {profile.title && profile.title !== title ? ` · окно «${profile.title}»` : ""}
+            {profile.title && profile.title !== title ? ` · ${t("game_window_title", { title: profile.title })}` : ""}
           </span>
         </div>
       </div>
@@ -85,59 +90,59 @@ export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack }:
         }}
       >
         <label className="field">
-          <span className="field-label">Название</span>
+          <span className="field-label">{t("game_name")}</span>
           <input
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
             placeholder={profile.title || profile.exe}
             maxLength={100}
           />
-          <span className="field-hint">Если заголовок окна не похож на название игры, агент будет знать, о какой игре речь.</span>
+          <span className="field-hint">{t("game_name_hint")}</span>
         </label>
 
         <label className="field">
-          <span className="field-label">Указания агенту</span>
+          <span className="field-label">{t("game_instructions")}</span>
           <textarea
             value={form.instructions}
             onChange={(e) => set("instructions", e.target.value)}
             rows={6}
             maxLength={4000}
-            placeholder={"Например:\nбез спойлеров дальше 3-й главы\nя играю за мага\nотвечай по-английски"}
+            placeholder={t("game_instructions_placeholder")}
           />
-          <span className="field-hint">Агент получает их в каждом чате этой игры.</span>
+          <span className="field-hint">{t("game_instructions_hint")}</span>
         </label>
 
         <label className="field">
-          <span className="field-label">Где искать</span>
+          <span className="field-label">{t("game_sources")}</span>
           <textarea
             value={form.sources}
             onChange={(e) => set("sources", e.target.value)}
             rows={3}
             maxLength={1000}
-            placeholder={"Сайты, по одному в строке:\nfextralife.com\nwiki.example.org"}
+            placeholder={t("game_sources_placeholder")}
           />
-          <span className="field-hint">Агент сначала ищет на этих сайтах, остальные — если там нет ответа.</span>
+          <span className="field-hint">{t("game_sources_hint")}</span>
         </label>
 
         <div className="game-form-actions">
           <button type="submit" className="btn primary" disabled={!dirty}>
-            Сохранить
+            {t("save")}
           </button>
           {dirty && (
             <button type="button" className="btn" onClick={() => setForm(saved)}>
-              Отменить
+              {t("discard")}
             </button>
           )}
           <span className="game-form-status">
-            {dirty ? "Есть несохранённые изменения" : "Применяется к чатам игры со следующего вопроса"}
+            {dirty ? t("unsaved_changes") : t("game_applies_next")}
           </span>
         </div>
       </form>
 
       <section className="game-chats">
-        <h2>Чаты{chats.length ? ` · ${chats.length}` : ""}</h2>
+        <h2>{t("game_chats")}{chats.length ? ` · ${chats.length}` : ""}</h2>
         {chats.length === 0 ? (
-          <div className="history-empty">Чатов по этой игре пока нет</div>
+          <div className="history-empty">{t("game_no_chats")}</div>
         ) : (
           chats.map((chat) => (
             <div key={chat.id} className={`history-item${chatId === chat.id ? " active" : ""}`}>
@@ -146,7 +151,7 @@ export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack }:
                 <span className="history-item-text">
                   <span className="history-item-title">{chat.title}</span>
                 </span>
-                <span className="game-chat-date">{DATE.format(chat.updatedAt)}</span>
+                <span className="game-chat-date">{date.format(chat.updatedAt)}</span>
               </button>
             </div>
           ))

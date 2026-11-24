@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tracing::{info, warn};
+
+use crate::protocol::Language;
 
 /// User settings, stored as TOML. Missing keys fall back to defaults, so old files keep working.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +13,9 @@ pub struct Config {
     pub port: u16,
     /// Agent id: "claude" or "codex".
     pub agent: String,
+    /// Interface language: "en", "ru", "es", "zh", "ja". Default: the system's, if the app has it.
+    #[serde(deserialize_with = "lenient_language")]
+    pub language: Language,
     pub hotkeys: Hotkeys,
     pub panel: PanelConfig,
     pub network: NetworkConfig,
@@ -115,6 +120,7 @@ impl Default for Config {
         Self {
             port: 47823,
             agent: "claude".into(),
+            language: crate::i18n::system_language(),
             hotkeys: Hotkeys::default(),
             panel: PanelConfig::default(),
             network: NetworkConfig::default(),
@@ -136,6 +142,15 @@ impl Default for PanelConfig {
     fn default() -> Self {
         Self { width: 640.0, expanded_height: 540.0, bottom_margin: 64.0, zoom: 1.0, capturable: false }
     }
+}
+
+/// A language this version doesn't know (a newer version's, say) resets only the language.
+fn lenient_language<'de, D: Deserializer<'de>>(d: D) -> Result<Language, D::Error> {
+    let value = toml::Value::deserialize(d)?;
+    Ok(Language::deserialize(value.clone()).unwrap_or_else(|_| {
+        warn!("config: unknown language {value}; using the system's");
+        crate::i18n::system_language()
+    }))
 }
 
 const HEADER: &str = "# game-overlai settings. Delete a line to restore its default.\n\
@@ -223,6 +238,17 @@ mod tests {
         let strict: Config = toml::from_str("[network]\nrequire_proxy_for = [\"Claude\"]\n").unwrap();
         assert!(strict.network.requires_proxy("claude") && !strict.network.requires_proxy("codex"));
         assert_eq!(strict.network.proxy, "system");
+    }
+
+    #[test]
+    fn language_is_read_leniently() {
+        let ja: Config = toml::from_str("language = \"ja\"\nport = 1\n").unwrap();
+        assert_eq!((ja.language, ja.port), (Language::Ja, 1));
+        // A newer version's language resets only the language.
+        let unknown: Config = toml::from_str("language = \"de\"\nport = 2\n").unwrap();
+        assert_eq!((unknown.language, unknown.port), (crate::i18n::system_language(), 2));
+        let written = toml::to_string_pretty(&Config { language: Language::Zh, ..Config::default() }).unwrap();
+        assert!(written.contains("language = \"zh\""), "{written}");
     }
 
     #[test]

@@ -10,6 +10,7 @@ import type { ClientMsg } from "./generated/ClientMsg";
 import type { GameInfo } from "./generated/GameInfo";
 import type { GameProfile } from "./generated/GameProfile";
 import type { LanStatus } from "./generated/LanStatus";
+import { setLanguage } from "../i18n";
 import type { AgentOption } from "./generated/AgentOption";
 import type { Settings } from "./generated/Settings";
 import { sameExe } from "./games";
@@ -106,6 +107,9 @@ function updateMessage(s: UiState, id: string, f: (m: ChatMessage) => ChatMessag
 function reduce(s: UiState, msg: ServerMsg): UiState {
   switch (msg.type) {
     case "hello":
+      return s;
+    case "language":
+      setLanguage(msg.language); // components follow it through useT
       return s;
     case "chat.snapshot":
       return { ...s, chatId: msg.chatId, messages: msg.messages, chatGame: msg.game, title: msg.title };

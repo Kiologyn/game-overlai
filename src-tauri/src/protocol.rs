@@ -41,6 +41,24 @@ pub enum ResizeEdge {
     Sw,
 }
 
+/// Interface language. A new language: a variant here, a dictionary web/src/locales/<code>.json,
+/// a row in i18n.rs (Rust) and in LANGUAGES in web/src/i18n.ts (interface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+#[repr(u8)]
+pub enum Language {
+    En,
+    Ru,
+    Es,
+    Zh,
+    Ja,
+}
+
+impl Language {
+    pub const ALL: [Language; 5] = [Language::En, Language::Ru, Language::Es, Language::Zh, Language::Ja];
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
@@ -461,6 +479,9 @@ pub enum ClientMsg {
     SettingsSave { values: SettingsValues },
     #[serde(rename = "settings.autostart")]
     SettingsAutostart { enabled: bool },
+    /// Applies at once (no Save): every UI, the tray and notifications switch.
+    #[serde(rename = "settings.language")]
+    SettingsLanguage { language: Language },
     /// The settings page records a hotkey: global hotkeys are off meanwhile, so pressing the
     /// current one doesn't open the panel.
     #[serde(rename = "settings.capturing")]
@@ -483,6 +504,9 @@ pub enum ClientMsg {
 pub enum ServerMsg {
     #[serde(rename = "hello")]
     Hello { version: String, client: ClientKind },
+    /// The interface language: after hello, and to every UI when the user changes it.
+    #[serde(rename = "language")]
+    Language { language: Language },
     /// Full state of the current chat (on connect, when a new chat starts or another one opens).
     /// `chatId` of an empty new chat is not in the history until its first message.
     #[serde(rename = "chat.snapshot", rename_all = "camelCase")]

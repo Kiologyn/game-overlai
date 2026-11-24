@@ -1,24 +1,26 @@
-// /settings on this PC: hotkeys, agent, proxy, panel, frames, phone port, notifications,
-// starting with Windows. The core sends the settings to this PC's UI only.
+// /settings on this PC: language, hotkeys, agent, proxy, panel, frames, phone port,
+// notifications, starting with Windows. The core sends the settings to this PC's UI only.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { RotateCcw, Settings as SettingsIcon } from "lucide-react";
 import type { Connection } from "../api/connection";
 import type { SettingsValues } from "../api/generated/SettingsValues";
 import { useUiState } from "../api/hooks";
+import { LANGUAGES, useLanguage, useT } from "../i18n";
 
+/** Frame heights with their string codes (1440p needs no words). */
 const FRAME_HEIGHTS = [
-  { value: 480, label: "480p — меньше лимитов, мелкий текст хуже" },
-  { value: 720, label: "720p (по умолчанию)" },
-  { value: 1080, label: "1080p — мелкий текст и интерфейс" },
-  { value: 1440, label: "1440p" },
-  { value: 0, label: "полный размер окна" },
+  { value: 480, code: "frame_480" },
+  { value: 720, code: "frame_720" },
+  { value: 1080, code: "frame_1080" },
+  { value: 1440, code: null },
+  { value: 0, code: "frame_full" },
 ];
 
 /** Same steps as the core's (`overlay::ZOOM_STEPS`). */
 const ZOOMS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
-type ProxyMode ="system" | "none" | "custom";
+type ProxyMode = "system" | "none" | "custom";
 
 const proxyMode = (p: string): ProxyMode => (p === "system" || p === "" ? "system" : p === "none" ? "none" : "custom");
 
@@ -26,6 +28,8 @@ const same = (a: SettingsValues, b: SettingsValues) => JSON.stringify(a) === JSO
 
 export function SettingsPage({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
+  const t = useT();
+  const language = useLanguage();
   const settings = ui.settings;
   const [form, setForm] = useState<SettingsValues | null>(null);
   const [mode, setMode] = useState<ProxyMode>("system");
@@ -49,10 +53,8 @@ export function SettingsPage({ conn }: { conn: Connection }) {
   if (!settings || !form) {
     return (
       <div className="settings-page">
-        <h1>Настройки</h1>
-        <p className="phone-note">
-          {ui.status === "open" ? "Настройки открываются только на ПК, где запущен game-overlai." : "Подключение к приложению…"}
-        </p>
+        <h1>{t("settings")}</h1>
+        <p className="phone-note">{ui.status === "open" ? t("settings_only_on_pc") : t("connecting_app")}</p>
       </div>
     );
   }
@@ -71,14 +73,14 @@ export function SettingsPage({ conn }: { conn: Connection }) {
     <div className="settings-page">
       <div className="phone-head">
         <SettingsIcon size={20} aria-hidden />
-        <h1>Настройки</h1>
+        <h1>{t("settings")}</h1>
       </div>
 
       {settings.restartNeeded && (
         <div className="settings-banner">
-          <span>Агент, прокси и порты применятся после перезапуска приложения.</span>
+          <span>{t("settings_restart_needed")}</span>
           <button type="button" className="btn primary" onClick={() => conn.send({ type: "app.restart" })}>
-            <RotateCcw size={13} aria-hidden /> Перезапустить
+            <RotateCcw size={13} aria-hidden /> {t("restart")}
           </button>
         </div>
       )}
@@ -91,25 +93,43 @@ export function SettingsPage({ conn }: { conn: Connection }) {
         }}
       >
         <section>
-          <h2>Горячие клавиши</h2>
+          {/* Also in English: someone who picked a language they can't read finds the way back. */}
+          <h2>{language === "en" ? "Language" : `${t("language")} · Language`}</h2>
           <div className="settings-row">
-            <span>Быстрый вопрос</span>
-            <HotkeyInput conn={conn} value={form.hotkeyQuick} onChange={(v) => set("hotkeyQuick", v)} />
+            {/* Applies at once, apart from the form's Save. Names in the languages themselves. */}
+            <select
+              value={language}
+              lang="mul"
+              onChange={(e) => conn.send({ type: "settings.language", language: e.target.value as typeof language })}
+            >
+              {LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code} lang={l.html}>
+                  {l.english === l.name ? l.name : `${l.name} — ${l.english}`}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="settings-row">
-            <span>Чат</span>
-            <HotkeyInput conn={conn} value={form.hotkeyChat} onChange={(v) => set("hotkeyChat", v)} />
-          </div>
-          {settings.hotkeysTaken.length > 0 && (
-            <p className="settings-warn">
-              Заняты другой программой: {settings.hotkeysTaken.map(prettyHotkey).join(", ")}. Выберите другое сочетание.
-            </p>
-          )}
-          <p className="field-hint">Нажмите на поле и затем сочетание. Применяется сразу после сохранения.</p>
+          <p className="field-hint">{t("language_hint")}</p>
         </section>
 
         <section>
-          <h2>Агент</h2>
+          <h2>{t("hotkeys")}</h2>
+          <div className="settings-row">
+            <span>{t("hotkey_quick")}</span>
+            <HotkeyInput conn={conn} value={form.hotkeyQuick} onChange={(v) => set("hotkeyQuick", v)} />
+          </div>
+          <div className="settings-row">
+            <span>{t("hotkey_chat")}</span>
+            <HotkeyInput conn={conn} value={form.hotkeyChat} onChange={(v) => set("hotkeyChat", v)} />
+          </div>
+          {settings.hotkeysTaken.length > 0 && (
+            <p className="settings-warn">{t("hotkeys_taken", { keys: settings.hotkeysTaken.map(prettyHotkey).join(", ") })}</p>
+          )}
+          <p className="field-hint">{t("hotkeys_hint")}</p>
+        </section>
+
+        <section>
+          <h2>{t("agent_section")}</h2>
           <div className="settings-choices">
             {settings.agents.map((a) => (
               <label key={a.id} className="settings-choice">
@@ -122,18 +142,18 @@ export function SettingsPage({ conn }: { conn: Connection }) {
         </section>
 
         <section>
-          <h2>Сеть</h2>
+          <h2>{t("network")}</h2>
           <div className="settings-row">
-            <span>Прокси</span>
+            <span>{t("proxy")}</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as ProxyMode)}>
-              <option value="system">системный прокси Windows</option>
-              <option value="none">без прокси</option>
-              <option value="custom">свой адрес</option>
+              <option value="system">{t("proxy_system")}</option>
+              <option value="none">{t("proxy_none")}</option>
+              <option value="custom">{t("proxy_custom")}</option>
             </select>
           </div>
           {mode === "custom" && (
             <div className="settings-row">
-              <span>Адрес</span>
+              <span>{t("proxy_address")}</span>
               <input
                 value={form.proxy === "system" || form.proxy === "none" ? "" : form.proxy}
                 onChange={(e) => set("proxy", e.target.value)}
@@ -153,18 +173,16 @@ export function SettingsPage({ conn }: { conn: Connection }) {
                   )
                 }
               />
-              Не подключаться к {agentName(a.id)} без прокси
+              {t("require_proxy", { agent: agentName(a.id) })}
             </label>
           ))}
-          <p className="field-hint">
-            Если прокси не найден, такой агент не запустится, а приложение будет ждать, пока прокси появится.
-          </p>
+          <p className="field-hint">{t("require_proxy_hint")}</p>
         </section>
 
         <section>
-          <h2>Панель</h2>
+          <h2>{t("panel")}</h2>
           <div className="settings-row">
-            <span>Размер по умолчанию</span>
+            <span>{t("panel_default_size")}</span>
             <span className="settings-pair">
               <input type="number" min={360} max={2000} value={form.panelWidth} onChange={(e) => set("panelWidth", Number(e.target.value))} />
               ×
@@ -172,7 +190,7 @@ export function SettingsPage({ conn }: { conn: Connection }) {
             </span>
           </div>
           <div className="settings-row">
-            <span>Масштаб по умолчанию</span>
+            <span>{t("panel_default_zoom")}</span>
             <select value={form.panelZoom} onChange={(e) => set("panelZoom", Number(e.target.value))}>
               {ZOOMS.map((z) => (
                 <option key={z} value={z}>
@@ -181,65 +199,58 @@ export function SettingsPage({ conn }: { conn: Connection }) {
               ))}
             </select>
           </div>
-          <p className="field-hint">
-            Для игр, над которыми панель ещё не двигали. Положение, размер и масштаб над каждой игрой запоминаются
-            сами. Масштаб панели: Ctrl + колесо мыши или Ctrl +/− над панелью, Ctrl+0 — вернуть масштаб по умолчанию.
-          </p>
+          <p className="field-hint">{t("panel_hint")}</p>
           <label className="settings-check">
             <input
               type="checkbox"
               checked={form.panelCapturable}
               onChange={(e) => set("panelCapturable", e.target.checked)}
             />
-            Показывать панель на записи и трансляции экрана
+            {t("panel_capturable")}
           </label>
-          <p className="field-hint">
-            Выключено: Windows прячет панель из скриншотов, записи и трансляций (OBS, Discord, Win+Shift+S). Включено:
-            её видно при захвате экрана или окна. Захват игры в OBS (Game Capture) берёт кадры у самой игры и панель
-            не видит в любом случае, а кадры игры для агента всегда без панели.
-          </p>
+          <p className="field-hint">{t("panel_capturable_hint")}</p>
           <button
             type="button"
             className="btn"
             onClick={() => {
-              if (confirm("Забыть, где стояла панель над каждой игрой?")) conn.send({ type: "settings.resetPanelPlaces" });
+              if (confirm(t("reset_panel_places_confirm"))) conn.send({ type: "settings.resetPanelPlaces" });
             }}
           >
-            Сбросить положения панели
+            {t("reset_panel_places")}
           </button>
         </section>
 
         <section>
-          <h2>Кадры игры для агента</h2>
+          <h2>{t("frames")}</h2>
           <div className="settings-row">
-            <span>Высота кадра</span>
+            <span>{t("frame_height")}</span>
             <select value={form.agentMaxHeight} onChange={(e) => set("agentMaxHeight", Number(e.target.value))}>
               {FRAME_HEIGHTS.map((h) => (
                 <option key={h.value} value={h.value}>
-                  {h.label}
+                  {h.code ? t(h.code) : `${h.value}p`}
                 </option>
               ))}
             </select>
           </div>
-          <p className="field-hint">Сохранённые кадры в истории всегда в полном размере.</p>
+          <p className="field-hint">{t("frames_hint")}</p>
         </section>
 
         <section>
-          <h2>Телефон</h2>
+          <h2>{t("phone")}</h2>
           <div className="settings-row">
-            <span>Порт</span>
+            <span>{t("port")}</span>
             <input type="number" min={1024} max={65535} value={form.lanPort} onChange={(e) => set("lanPort", Number(e.target.value))} />
           </div>
           <p className="field-hint">
-            QR-код и включение доступа — на странице <a href="/phone">Телефон</a>.
+            {t("phone_settings_hint")} <a href="/phone">{t("phone_page_link")}</a>
           </p>
         </section>
 
         <section>
-          <h2>Уведомления и запуск</h2>
+          <h2>{t("notifications_startup")}</h2>
           <label className="settings-check">
             <input type="checkbox" checked={form.notifications} onChange={(e) => set("notifications", e.target.checked)} />
-            Уведомлять, когда ответ готов, а панель скрыта
+            {t("notify_when_hidden")}
           </label>
           <label className="settings-check">
             <input
@@ -247,16 +258,16 @@ export function SettingsPage({ conn }: { conn: Connection }) {
               checked={settings.autostart}
               onChange={(e) => conn.send({ type: "settings.autostart", enabled: e.target.checked })}
             />
-            Запускать вместе с Windows
+            {t("autostart")}
           </label>
           {settings.autostartOther && (
-            <p className="settings-warn">Сейчас автозапуск настроен для другой копии: {settings.autostartOther}</p>
+            <p className="settings-warn">{t("autostart_other", { path: settings.autostartOther })}</p>
           )}
         </section>
 
         <div className="game-form-actions settings-actions">
           <button type="submit" className="btn primary" disabled={!dirty && mode === proxyMode(settings.values.proxy)}>
-            Сохранить
+            {t("save")}
           </button>
           {dirty && (
             <button
@@ -267,7 +278,7 @@ export function SettingsPage({ conn }: { conn: Connection }) {
                 setMode(proxyMode(settings.values.proxy));
               }}
             >
-              Отменить
+              {t("discard")}
             </button>
           )}
           {settings.error && <span className="settings-error">{settings.error}</span>}
@@ -275,7 +286,7 @@ export function SettingsPage({ conn }: { conn: Connection }) {
       </form>
 
       <p className="settings-about">
-        game-overlai {settings.version} · настройки: {settings.configFile} · данные: {settings.dataDir}
+        game-overlai {settings.version} · {t("settings_about", { config: settings.configFile, data: settings.dataDir })}
       </p>
     </div>
   );
@@ -303,6 +314,7 @@ function keyName(e: KeyboardEvent): string | null {
 
 /** Records a key combination; our global hotkeys are off while it has focus. */
 function HotkeyInput({ conn, value, onChange }: { conn: Connection; value: string; onChange(v: string): void }) {
+  const t = useT();
   const [recording, setRecording] = useState(false);
   const setCapturing = (active: boolean) => {
     setRecording(active);
@@ -331,7 +343,7 @@ function HotkeyInput({ conn, value, onChange }: { conn: Connection; value: strin
         (e.target as HTMLElement).blur();
       }}
     >
-      {recording ? "Нажмите сочетание…" : prettyHotkey(value)}
+      {recording ? t("press_combination") : prettyHotkey(value)}
     </button>
   );
 }

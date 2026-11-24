@@ -38,12 +38,12 @@ pub fn agent_size(width: u32, height: u32, max_height: u32) -> (u32, u32) {
 /// The frame scaled to `width`×`height` (Lanczos: keeps small text readable).
 pub fn downscale(frame: &Frame, width: u32, height: u32) -> Result<Frame, String> {
     let src = ImageRef::new(frame.width, frame.height, &frame.bgra, PixelType::U8x4)
-        .map_err(|e| format!("кадр: {e}"))?;
+        .map_err(|e| tr!("err_frame", error = e))?;
     let mut dst = ResizeImage::new(width, height, PixelType::U8x4);
     let options = ResizeOptions::new()
         .resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3))
         .use_alpha(false); // BGRA from the GPU is opaque
-    Resizer::new().resize(&src, &mut dst, &options).map_err(|e| format!("уменьшение кадра: {e}"))?;
+    Resizer::new().resize(&src, &mut dst, &options).map_err(|e| tr!("err_frame_scale", error = e))?;
     Ok(Frame { width, height, bgra: dst.into_vec(), source: frame.source, taken: frame.taken })
 }
 
@@ -66,7 +66,8 @@ impl std::fmt::Debug for Image {
 }
 
 pub fn encode(frame: &Frame) -> Result<Image, String> {
-    let too_big = || format!("кадр {}×{} слишком большой", frame.width, frame.height);
+    let size = format!("{}×{}", frame.width, frame.height);
+    let too_big = || tr!("err_frame_too_big", size = size);
     let w = u16::try_from(frame.width).map_err(|_| too_big())?;
     let h = u16::try_from(frame.height).map_err(|_| too_big())?;
     for quality in QUALITIES {
@@ -78,7 +79,7 @@ pub fn encode(frame: &Frame) -> Result<Image, String> {
             return Ok(Image { bytes, mime: "image/jpeg", width: frame.width, height: frame.height });
         }
     }
-    Err(format!("кадр {}×{} не помещается в лимит 5 МБ", frame.width, frame.height))
+    Err(tr!("err_frame_over_limit", size = size))
 }
 
 #[cfg(test)]

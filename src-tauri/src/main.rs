@@ -1,6 +1,8 @@
 // No console window in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod agent;
 mod capture;
 mod chat;
@@ -38,6 +40,7 @@ fn main() {
     info!("game-overlai {} starting", env!("CARGO_PKG_VERSION"));
 
     let config = config::load(&paths.config_file);
+    i18n::set_language(config.language);
     let (listener, port) = match server::bind(config.port) {
         Ok(v) => v,
         Err(e) => {
@@ -116,7 +119,7 @@ fn main() {
         }
     };
     app.run(|app, event| match event {
-        // The app lives in the tray: hidden windows must not end it. Only "Выход" (exit(0)) does.
+        // The app lives in the tray: hidden windows must not end it. Only "Quit" (exit(0)) does.
         RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
         // An answer still streaming is saved as far as it got.
         RunEvent::Exit => {

@@ -8,7 +8,7 @@ use tracing::{info, warn};
 
 use crate::agent::spec;
 use crate::config::{self, Config};
-use crate::protocol::{AgentChoice, ServerMsg, Settings, SettingsValues};
+use crate::protocol::{AgentChoice, Language, ServerMsg, Settings, SettingsValues};
 use crate::state::{AppState, Target};
 
 /// Why the last save was refused (shown on the page until the next save).
@@ -22,7 +22,7 @@ pub fn snapshot(state: &AppState) -> ServerMsg {
             values: values_of(&cfg),
             agents: spec::ALL
                 .iter()
-                .map(|s| AgentChoice { id: s.id.into(), name: s.name.into(), login_hint: s.login_hint.into() })
+                .map(|s| AgentChoice { id: s.id.into(), name: s.name.into(), login_hint: crate::i18n::text(s.login_hint).into() })
                 .collect(),
             restart_needed: needs_restart(&state.started_with, &cfg),
             hotkeys_taken: state.failed_hotkeys.lock().unwrap().clone(),
@@ -57,34 +57,34 @@ fn values_of(cfg: &Config) -> SettingsValues {
     }
 }
 
-/// Checks the values and puts them into `cfg`. Errors are for the user (Russian).
+/// Checks the values and puts them into `cfg`. Errors are for the user (in their language).
 fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
-    let quick = normalize_hotkey(&v.hotkey_quick, "быстрого вопроса")?;
-    let chat = normalize_hotkey(&v.hotkey_chat, "чата")?;
+    let quick = normalize_hotkey(&v.hotkey_quick).map_err(|keys| tr!("err_hotkey_quick", keys = keys))?;
+    let chat = normalize_hotkey(&v.hotkey_chat).map_err(|keys| tr!("err_hotkey_chat", keys = keys))?;
     if quick == chat {
-        return Err("У быстрого вопроса и чата должны быть разные сочетания клавиш.".into());
+        return Err(tr!("err_hotkeys_same"));
     }
     if !spec::ALL.iter().any(|s| s.id == v.agent) {
-        return Err(format!("Неизвестный агент: {}", v.agent));
+        return Err(tr!("err_unknown_agent", agent = v.agent));
     }
     let proxy = v.proxy.trim();
     let proxy = match proxy.to_ascii_lowercase().as_str() {
         "" | "system" => "system".to_string(),
         "none" => "none".to_string(),
         _ if valid_proxy_url(proxy) => proxy.to_string(),
-        _ => return Err("Прокси: укажите адрес вида http://127.0.0.1:10808.".into()),
+        _ => return Err(tr!("err_proxy")),
     };
     if !(360.0..=2000.0).contains(&v.panel_width) || !(220.0..=1600.0).contains(&v.panel_height) {
-        return Err("Размер панели: ширина от 360 до 2000, высота от 220 до 1600.".into());
+        return Err(tr!("err_panel_size"));
     }
     if !(0.5..=2.0).contains(&v.panel_zoom) {
-        return Err("Масштаб панели: от 50 до 200 %.".into());
+        return Err(tr!("err_panel_zoom"));
     }
     if v.agent_max_height != 0 && !(360..=2160).contains(&v.agent_max_height) {
-        return Err("Высота кадра для агента: от 360 до 2160 (или «полный размер»).".into());
+        return Err(tr!("err_frame_height"));
     }
     if v.lan_port < 1024 || v.lan_port == cfg.port {
-        return Err(format!("Порт для телефона: от 1024 до 65535, не {}.", cfg.port));
+        return Err(tr!("err_lan_port", port = cfg.port));
     }
     cfg.hotkeys.quick = quick;
     cfg.hotkeys.chat = chat;
@@ -105,11 +105,12 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_hotkey(s: &str, what: &str) -> Result<String, String> {
+/// The hotkey in the core's form; Err: the unrecognized text.
+fn normalize_hotkey(s: &str) -> Result<String, String> {
     let s = s.trim().to_ascii_lowercase().replace(' ', "");
     match s.parse::<tauri_plugin_global_shortcut::Shortcut>() {
         Ok(_) if !s.is_empty() => Ok(s),
-        _ => Err(format!("Сочетание клавиш для {what} не распознано: «{s}».")),
+        _ => Err(s),
     }
 }
 
@@ -146,7 +147,7 @@ pub fn save(state: &Arc<AppState>, values: SettingsValues) {
     let before = state.cfg();
     let mut next = before.clone();
     let result = apply(&values, &mut next).and_then(|()| {
-        config::save(&state.config_file, &next).map_err(|e| format!("Не удалось записать {}: {e}", state.config_file.display()))
+        config::save(&state.config_file, &next).map_err(|e| tr!("err_write_config", file = state.config_file.display(), error = e))
     });
     match result {
         Ok(()) => {
@@ -182,10 +183,35 @@ pub fn set_autostart(state: &AppState, on: bool) {
         Ok(()) => info!("start with Windows: {on}"),
         Err(e) => {
             warn!("start with Windows: {e}");
-            *LAST_ERROR.lock().unwrap() = Some(format!("Автозапуск: {e}"));
+            *LAST_ERROR.lock().unwrap() = Some(tr!("err_autostart", error = e));
         }
     }
     broadcast(state);
+}
+
+/// Switches the language at once: every UI, the tray menu and tooltip, later notifications and
+/// errors. Saved in config.toml.
+pub fn set_language(state: &Arc<AppState>, language: Language) {
+    let mut next = state.cfg();
+    if next.language == language {
+        return;
+    }
+    next.language = language;
+    crate::i18n::set_language(language);
+    info!("language: {language:?}");
+    match config::save(&state.config_file, &next) {
+        Ok(()) => *LAST_ERROR.lock().unwrap() = None,
+        Err(e) => {
+            warn!("language not saved: {e}");
+            *LAST_ERROR.lock().unwrap() = Some(tr!("err_write_config", file = state.config_file.display(), error = e));
+        }
+    }
+    *state.config.write().unwrap() = next;
+    state.hub.send(Target::All, ServerMsg::Language { language });
+    if let Some(app) = state.app.get() {
+        crate::tray::refresh_menu(app);
+    }
+    broadcast(state); // the agents' sign-in hints
 }
 
 /// Restarts the app (agent, proxy, ports). The open browser pages reconnect by themselves.

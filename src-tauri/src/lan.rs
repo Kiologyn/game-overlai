@@ -192,7 +192,7 @@ pub fn set_enabled(state: &Arc<AppState>, on: bool) {
                 }
                 Err(e) => {
                     warn!("LAN access: can't start: {e}");
-                    inner.error = Some(format!("Не удалось открыть порт: {e}"));
+                    inner.error = Some(tr!("err_open_port", error = e));
                 }
             }
         }
@@ -241,7 +241,7 @@ fn start(state: &Arc<AppState>, preferred: u16) -> anyhow::Result<Running> {
     })?;
     listener.set_nonblocking(true)?;
     let port = listener.local_addr()?.port();
-    let app = state.app.get().cloned().ok_or_else(|| anyhow::anyhow!("приложение ещё запускается"))?;
+    let app = state.app.get().cloned().ok_or_else(|| anyhow::anyhow!(tr!("err_app_starting")))?;
     let (stop, stopped) = oneshot::channel();
     tauri::async_runtime::spawn(crate::server::run_lan(listener, app, state.clone(), stopped));
     Ok(Running { port, stop })

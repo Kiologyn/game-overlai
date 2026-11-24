@@ -149,17 +149,27 @@ async fn lan_guard(State(ctx): State<Ctx>, req: Request, next: Next) -> Response
         }
     };
     warn!("LAN: {path} from {peer}: no access, {reason}");
-    (StatusCode::UNAUTHORIZED, Html(NO_ACCESS)).into_response()
+    (StatusCode::UNAUTHORIZED, Html(no_access_page())).into_response()
 }
 
-const NO_ACCESS: &str = r#"<!doctype html><html lang="ru"><head><meta charset="utf-8">
+/// The page a phone without a valid sign-in gets, in the app's language.
+fn no_access_page() -> String {
+    let lang = serde_json::to_value(crate::i18n::language()).ok().and_then(|v| v.as_str().map(str::to_owned));
+    format!(
+        r#"<!doctype html><html lang="{}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>game-overlai</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e0e0e;color:#ececec;
-font:15px/1.5 system-ui,sans-serif}main{max-width:340px;padding:24px}h1{font-size:18px;margin:0 0 8px}
-p{color:#8b8b8b;margin:0 0 8px}</style></head><body><main><h1>Нет доступа</h1>
-<p>Откройте на ПК в трее game-overlai «Телефон: QR-код» и отсканируйте код заново.</p>
-<p>Если после этого снова «Нет доступа», проверьте, что браузер на телефоне не блокирует cookie.</p>
-</main></body></html>"#;
+<style>body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e0e0e;color:#ececec;
+font:15px/1.5 system-ui,sans-serif}}main{{max-width:340px;padding:24px}}h1{{font-size:18px;margin:0 0 8px}}
+p{{color:#8b8b8b;margin:0 0 8px}}</style></head><body><main><h1>{}</h1>
+<p>{}</p>
+<p>{}</p>
+</main></body></html>"#,
+        lang.unwrap_or_else(|| "en".into()),
+        tr!("no_access"),
+        tr!("no_access_rescan"),
+        tr!("no_access_cookie"),
+    )
+}
 
 fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
     query.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))

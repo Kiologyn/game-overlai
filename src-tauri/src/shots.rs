@@ -59,7 +59,7 @@ pub async fn for_agent(state: &AppState) -> Result<AgentFrame, String> {
 
 async fn grab_game(state: &AppState, hwnd: isize) -> Result<Frame, String> {
     if hwnd == 0 {
-        return Err("игра не определена — откройте оверлей горячей клавишей поверх игры".into());
+        return Err(tr!("err_no_game"));
     }
     state.capture.grab(hwnd).await
 }
@@ -104,7 +104,7 @@ pub async fn store(state: &AppState, chat_id: &str, frame: Arc<Frame>) -> Result
         }
     });
     let (for_agent, saved) = tokio::join!(for_agent, saved);
-    let (mime, base64, sent_bytes) = for_agent.map_err(|_| "кодирование кадра прервалось".to_string())??;
+    let (mime, base64, sent_bytes) = for_agent.map_err(|_| tr!("err_encode_interrupted"))??;
     match saved {
         Ok(Ok((saved_mime, size))) => {
             if !state.history.add_shot(chat_id, &shot, saved_mime, size) {

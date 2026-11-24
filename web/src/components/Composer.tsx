@@ -3,6 +3,7 @@ import { ArrowUp, Gamepad2, GripVertical, Square, X } from "lucide-react";
 import type { AgentOption } from "../api/generated/AgentOption";
 import type { GameInfo } from "../api/generated/GameInfo";
 import { ModelPicker } from "./ModelPicker";
+import { useT } from "../i18n";
 
 interface Props {
   value: string;
@@ -32,6 +33,7 @@ interface Props {
 
 export function Composer(props: Props) {
   const { value, onChange, onSubmit, busy, onStop, onClose, game, agentName } = props;
+  const t = useT();
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.nativeEvent.isComposing) {
@@ -45,7 +47,7 @@ export function Composer(props: Props) {
       {props.onDragStart && (
         <span
           className="drag-grip"
-          aria-label="Перетащить панель"
+          aria-label={t("drag_panel")}
           onPointerDown={(e) => {
             if (e.button !== 0) return;
             e.preventDefault();
@@ -65,7 +67,7 @@ export function Composer(props: Props) {
         );
         const about = `${game.title}${game.exe ? ` (${game.exe})` : ""}`;
         return props.onOpenGame && game.exe ? (
-          <button type="button" className="chip game clickable" onClick={props.onOpenGame} title={`${about} — профиль игры`}>
+          <button type="button" className="chip game clickable" onClick={props.onOpenGame} title={t("game_chip_title", { about })}>
             {content}
           </button>
         ) : (
@@ -91,16 +93,16 @@ export function Composer(props: Props) {
         onBeforeOpen={props.onBeforeModelMenu}
       />
       {busy ? (
-        <button type="button" className="icon-btn send stop" onClick={onStop} title="Остановить ответ">
+        <button type="button" className="icon-btn send stop" onClick={onStop} title={t("stop_answer")}>
           <Square size={12} fill="currentColor" />
         </button>
       ) : (
-        <button type="button" className="icon-btn send" onClick={onSubmit} disabled={!value.trim()} title="Отправить (Enter)">
+        <button type="button" className="icon-btn send" onClick={onSubmit} disabled={!value.trim()} title={t("send_enter")}>
           <ArrowUp size={16} />
         </button>
       )}
       {onClose && (
-        <button type="button" className="icon-btn close" onClick={onClose} title="Скрыть (Esc)">
+        <button type="button" className="icon-btn close" onClick={onClose} title={t("hide_esc")}>
           <X size={16} />
         </button>
       )}

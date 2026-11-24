@@ -12,13 +12,16 @@ import { MessageList } from "../components/MessageList";
 import { ShotViewerProvider } from "../components/Shots";
 import { groupChats } from "../components/chatGroups";
 import { GamePage } from "./GamePage";
+import { useT } from "../i18n";
 
-const STATUS_TEXT = { open: "подключено", connecting: "подключение…", closed: "нет связи" } as const;
+/** String codes of the connection states. */
+const STATUS_TEXT = { open: "status_open", connecting: "status_connecting", closed: "status_closed" } as const;
 
 const gameInUrl = () => new URLSearchParams(location.search).get("game");
 
 export function App({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
+  const t = useT();
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   /** Exe of the game whose page is open; null = the chat. */
@@ -26,7 +29,8 @@ export function App({ conn }: { conn: Connection }) {
   /** Narrow screens (phone): the chat list slides in over the chat. */
   const [navOpen, setNavOpen] = useState(false);
   const busy = isBusy(ui);
-  const chatGroups = useMemo(() => groupChats(ui.chats, query, ui.games), [query, ui.chats, ui.games]);
+  const noGame = t("no_game");
+  const chatGroups = useMemo(() => groupChats(ui.chats, query, ui.games, noGame), [query, ui.chats, ui.games, noGame]);
 
   // The URL follows the page (reload keeps it); back/forward switch it.
   const showGame = (exe: string | null) => {
@@ -64,7 +68,7 @@ export function App({ conn }: { conn: Connection }) {
             type="button"
             className="icon-btn nav-toggle"
             onClick={() => setNavOpen((open) => !open)}
-            aria-label="Список чатов"
+            aria-label={t("chat_list")}
             aria-expanded={navOpen}
           >
             <Menu size={18} />
@@ -72,11 +76,11 @@ export function App({ conn }: { conn: Connection }) {
           <AgentDot agent={ui.agent} />
           <span className="brand">game-overlai</span>
           <span className="topbar-title">
-            {gameProfile ? "Профиль игры" : (ui.title ?? (ui.messages.length ? "" : "Новый чат"))}
+            {gameProfile ? t("game_profile") : (ui.title ?? (ui.messages.length ? "" : t("new_chat")))}
           </span>
           <span className="topbar-right">
             <UsageBadge usage={ui.usage} />
-            <span className={`status ${ui.status}`}>{STATUS_TEXT[ui.status]}</span>
+            <span className={`status ${ui.status}`}>{t(STATUS_TEXT[ui.status])}</span>
             <button
               type="button"
               className="icon-btn"
@@ -84,7 +88,7 @@ export function App({ conn }: { conn: Connection }) {
                 conn.send({ type: "chat.new" });
                 showGame(null);
               }}
-              title="Новый чат"
+              title={t("new_chat")}
             >
               <Plus size={16} />
             </button>
@@ -92,17 +96,17 @@ export function App({ conn }: { conn: Connection }) {
         </header>
         <div className="browser-workspace">
           {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
-          <aside className={`history-sidebar${navOpen ? " open" : ""}`} aria-label="История чатов">
+          <aside className={`history-sidebar${navOpen ? " open" : ""}`} aria-label={t("chat_history")}>
             <div className="history-heading">
-              <span>История</span>
+              <span>{t("history")}</span>
             </div>
             <label className="history-search">
               <Search size={15} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по чатам" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search_chats")} />
             </label>
             <div className="history-list">
               {chatGroups.length === 0 ? (
-                <div className="history-empty">{ui.chats.length ? "Ничего не найдено" : "Чаты появятся здесь"}</div>
+                <div className="history-empty">{ui.chats.length ? t("nothing_found") : t("chats_appear_here")}</div>
               ) : (
                 chatGroups.map((group) => (
                   <section className="history-group" key={group.key}>
@@ -111,7 +115,7 @@ export function App({ conn }: { conn: Connection }) {
                         type="button"
                         className={`history-group-title${gameExe && sameExe(gameExe, group.exe) ? " active" : ""}`}
                         onClick={() => showGame(group.exe)}
-                        title="Профиль игры: название, указания агенту, где искать"
+                        title={t("game_profile_hint")}
                       >
                         <span>{group.label}</span>
                         <Settings2 size={13} aria-hidden />
@@ -135,8 +139,8 @@ export function App({ conn }: { conn: Connection }) {
                         <button
                           type="button"
                           className="history-delete"
-                          title="Удалить чат"
-                          aria-label={`Удалить чат ${chat.title}`}
+                          title={t("delete_chat")}
+                          aria-label={t("delete_chat_named", { title: chat.title })}
                           onClick={() => conn.send({ type: "chat.delete", id: chat.id })}
                         >
                           <Trash2 size={14} />
@@ -174,7 +178,7 @@ export function App({ conn }: { conn: Connection }) {
                 messages={ui.messages}
                 permissions={ui.permissions}
                 onPermission={(id, optionId) => conn.send({ type: "permission.respond", id, optionId })}
-                emptyHint="Здесь появится текущий чат из оверлея."
+                emptyHint={t("browser_empty_hint")}
               />
               <AgentNotice agent={ui.agent} />
               <div className="page-composer">
@@ -190,7 +194,7 @@ export function App({ conn }: { conn: Connection }) {
                   agentName={ui.agent?.agent ?? "Claude"}
                   agentOptions={ui.agentOptions}
                   onSetAgentOption={(id, value) => conn.send({ type: "agent.setOption", id, value })}
-                  placeholder="Сообщение…"
+                  placeholder={t("message_placeholder")}
                 />
               </div>
             </main>

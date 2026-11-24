@@ -66,14 +66,14 @@ pub struct Failure {
 }
 
 impl Failure {
-    fn user(message: &str) -> Self {
-        Self { message: message.into(), device: false }
+    fn user(message: String) -> Self {
+        Self { message, device: false }
     }
 }
 
 impl From<windows::core::Error> for Failure {
     fn from(e: windows::core::Error) -> Self {
-        Self { message: format!("ошибка захвата: {}", e.message()), device: true }
+        Self { message: tr!("err_capture", error = e.message()), device: true }
     }
 }
 
@@ -87,10 +87,10 @@ pub struct ItemCache(Option<(isize, GraphicsCaptureItem)>);
 pub fn grab(d3d: &D3D, items: &mut ItemCache, hwnd: HWND) -> Result<Frame, Failure> {
     unsafe {
         if hwnd.is_invalid() || !IsWindow(Some(hwnd)).as_bool() {
-            return Err(Failure::user("окно игры закрыто"));
+            return Err(Failure::user(tr!("err_game_closed")));
         }
         if IsIconic(hwnd).as_bool() {
-            return Err(Failure::user("окно игры свёрнуто"));
+            return Err(Failure::user(tr!("err_game_minimized")));
         }
     }
     let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
@@ -113,7 +113,7 @@ pub fn grab(d3d: &D3D, items: &mut ItemCache, hwnd: HWND) -> Result<Frame, Failu
     };
     let failure = match window {
         Ok(frame) if !frame.is_black() => return Ok(frame),
-        Ok(_) => Failure::user("кадр получился чёрным: игра не даёт себя захватить"),
+        Ok(_) => Failure::user(tr!("err_black_frame")),
         Err(e) => e,
     };
     if !covers_monitor(hwnd) {
@@ -123,7 +123,7 @@ pub fn grab(d3d: &D3D, items: &mut ItemCache, hwnd: HWND) -> Result<Frame, Failu
     let _panel_hidden = crate::overlay::win32::out_of_capture(); // if the user lets it into captures
     let item: GraphicsCaptureItem = unsafe { interop.CreateForMonitor(monitor)? };
     match capture(d3d, &item, Source::Monitor)? {
-        frame if frame.is_black() => Err(Failure::user("кадр получился чёрным: игра не даёт себя захватить")),
+        frame if frame.is_black() => Err(Failure::user(tr!("err_black_frame"))),
         frame => Ok(frame),
     }
 }
@@ -145,7 +145,7 @@ fn capture(d3d: &D3D, item: &GraphicsCaptureItem, source: Source) -> Result<Fram
     let t_setup = Instant::now();
     let size = item.Size()?;
     if size.Width <= 0 || size.Height <= 0 {
-        return Err(Failure::user("окно игры не имеет размера"));
+        return Err(Failure::user(tr!("err_game_no_size")));
     }
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
         &d3d.winrt_device,
@@ -184,7 +184,7 @@ fn capture(d3d: &D3D, item: &GraphicsCaptureItem, source: Source) -> Result<Fram
     let t_frame = t0.elapsed();
     let result = match &frame {
         Some(f) => read_back(d3d, f, source),
-        None => Err(Failure::user("игра не отдала кадр за секунду")),
+        None => Err(Failure::user(tr!("err_no_frame"))),
     };
     trace!(
         "wgc {source:?}: start {} ms, first frame {} ms, readback {} ms",

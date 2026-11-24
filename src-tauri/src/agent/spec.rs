@@ -19,6 +19,7 @@ pub struct AgentSpec {
     /// (`Override`); codex-acp accepts only `Append`.
     pub system_prompt_mode: SystemPromptMode,
     /// Hint shown when the agent reports it is not signed in.
+    /// How to sign in: the code of a string in web/src/locales (see i18n.rs).
     pub login_hint: &'static str,
 }
 
@@ -30,7 +31,7 @@ pub const CLAUDE: AgentSpec = AgentSpec {
     entry: "dist/index.js",
     session_meta: claude_meta,
     system_prompt_mode: SystemPromptMode::Override,
-    login_hint: "Войдите в Claude Code: откройте терминал, выполните `claude` и команду `/login`.",
+    login_hint: "login_hint_claude",
 };
 
 pub const CODEX: AgentSpec = AgentSpec {
@@ -41,7 +42,7 @@ pub const CODEX: AgentSpec = AgentSpec {
     entry: "dist/index.js",
     session_meta: codex_meta,
     system_prompt_mode: SystemPromptMode::Append,
-    login_hint: "Войдите в Codex в терминале командой `codex login`, затем перезапустите приложение.",
+    login_hint: "login_hint_codex",
 };
 
 /// Agents the user can choose in the settings.

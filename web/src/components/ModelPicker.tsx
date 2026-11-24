@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronUp } from "lucide-react";
 import type { AgentOption } from "../api/generated/AgentOption";
+import { useT, type T } from "../i18n";
 
 interface Props {
   options: AgentOption[];
@@ -15,28 +16,31 @@ interface Props {
   onBeforeOpen?: () => void;
 }
 
-const TITLES = { model: "Модель", effort: "Размышление" } as const;
+const TITLES = { model: "model", effort: "effort" } as const;
 
-/** Russian names of the usual effort levels; others keep the agent's name. */
+/** Our names of the usual effort levels (string codes); others keep the agent's name. */
 const EFFORT_NAMES: Record<string, string> = {
-  default: "По умолчанию",
-  low: "Низкое",
-  medium: "Среднее",
-  high: "Высокое",
-  xhigh: "Очень высокое",
-  max: "Максимальное",
+  default: "effort_default",
+  low: "effort_low",
+  medium: "effort_medium",
+  high: "effort_high",
+  xhigh: "effort_xhigh",
+  max: "effort_max",
 };
 
 /** Long lists (Claude lists every model version): the first ones, the rest on demand. */
 const SHORT_LIST = 5;
 
-const valueName = (o: AgentOption, value: string) =>
-  (o.kind === "effort" ? EFFORT_NAMES[value] : undefined) ?? o.values.find((v) => v.value === value)?.name ?? value;
+const valueName = (o: AgentOption, value: string, t: T) => {
+  const ours = o.kind === "effort" ? EFFORT_NAMES[value] : undefined;
+  return ours ? t(ours) : (o.values.find((v) => v.value === value)?.name ?? value);
+};
 
 /** "Default (recommended)" -> "Default" for the button. */
 const short = (name: string) => name.replace(/\s*\(.*\)\s*$/, "").trim() || name;
 
 export function ModelPicker({ options, agentName, onSet, onBeforeOpen }: Props) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -63,16 +67,16 @@ export function ModelPicker({ options, agentName, onSet, onBeforeOpen }: Props) 
 
   if (options.length === 0) {
     return (
-      <span className="agent" title="Модель">
+      <span className="agent" title={t("model")}>
         {agentName}
       </span>
     );
   }
 
-  // "Sonnet 5.5 · Высокое"; the default effort is not worth the space.
+  // "Sonnet 5.5 · High"; the default effort is not worth the space.
   const label = options
     .filter((o) => !(o.kind === "effort" && o.current === "default"))
-    .map((o) => short(valueName(o, o.current)))
+    .map((o) => short(valueName(o, o.current, t)))
     .join(" · ");
 
   return (
@@ -85,7 +89,7 @@ export function ModelPicker({ options, agentName, onSet, onBeforeOpen }: Props) 
           setAll(false);
           setOpen(!open);
         }}
-        title="Модель и глубина размышления"
+        title={t("model_button_title")}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -97,7 +101,7 @@ export function ModelPicker({ options, agentName, onSet, onBeforeOpen }: Props) 
           {options.map((o) => (
             <OptionList key={o.id} option={o} all={all} onMore={() => setAll(true)} onSet={onSet} />
           ))}
-          <p className="model-menu-note">Для этого чата сразу и для следующих чатов.</p>
+          <p className="model-menu-note">{t("model_menu_note")}</p>
         </div>
       )}
     </div>
@@ -112,11 +116,12 @@ interface ListProps {
 }
 
 function OptionList({ option: o, all, onMore, onSet }: ListProps) {
+  const t = useT();
   const cut = o.values.length > SHORT_LIST + 1 && !all;
   const shown = cut ? o.values.filter((v, i) => i < SHORT_LIST || v.value === o.current) : o.values;
   return (
     <section>
-      <div className="model-menu-title">{TITLES[o.kind] ?? o.name}</div>
+      <div className="model-menu-title">{TITLES[o.kind] ? t(TITLES[o.kind]) : o.name}</div>
       {shown.map((v) => (
         <button
           key={v.value}
@@ -127,7 +132,7 @@ function OptionList({ option: o, all, onMore, onSet }: ListProps) {
           onClick={() => v.value !== o.current && onSet(o.id, v.value)}
         >
           <span className="model-item-text">
-            <span>{valueName(o, v.value)}</span>
+            <span>{valueName(o, v.value, t)}</span>
             {v.description && <small>{v.description}</small>}
           </span>
           {v.value === o.current && <Check size={14} aria-hidden />}
@@ -135,7 +140,7 @@ function OptionList({ option: o, all, onMore, onSet }: ListProps) {
       ))}
       {cut && (
         <button type="button" className="model-item more" onClick={onMore}>
-          Другие версии ({o.values.length - shown.length})
+          {t("model_other_versions", { count: o.values.length - shown.length })}
         </button>
       )}
     </section>

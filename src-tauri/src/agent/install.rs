@@ -41,14 +41,14 @@ pub fn ensure_installed(agents_dir: &Path, spec: &AgentSpec, proxy: &ProxyEnv) -
         return Ok(entry);
     }
     if command("node").arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
-        return Err("Не найден Node.js. Установите Node.js LTS (nodejs.org) и перезапустите приложение.".into());
+        return Err(tr!("err_no_node"));
     }
     if command("npm.cmd").arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
-        return Err("Не найден npm (идёт вместе с Node.js). Переустановите Node.js и перезапустите приложение.".into());
+        return Err(tr!("err_no_npm"));
     }
 
     let dir = install_dir(agents_dir, spec);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| tr!("err_create_dir", dir = dir.display(), error = e))?;
     let _ = std::fs::write(dir.join("package.json"), "{ \"private\": true }\n");
     let package = format!("{}@{}", spec.npm_package, spec.npm_version);
     info!("installing {package} into {}", dir.display());
@@ -57,16 +57,13 @@ pub fn ensure_installed(agents_dir: &Path, spec: &AgentSpec, proxy: &ProxyEnv) -
         .envs(proxy.vars())
         .current_dir(&dir)
         .output()
-        .map_err(|e| format!("Не удалось запустить npm: {e}"))?;
+        .map_err(|e| tr!("err_run_npm", error = e))?;
     if !out.status.success() || !entry.is_file() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = stderr.lines().rev().take(4).collect();
         warn!("npm install failed: {stderr}");
-        return Err(format!(
-            "Не удалось установить адаптер {}: {}",
-            spec.name,
-            tail.into_iter().rev().collect::<Vec<_>>().join(" ")
-        ));
+        let tail = tail.into_iter().rev().collect::<Vec<_>>().join(" ");
+        return Err(tr!("err_install_adapter", agent = spec.name, error = tail));
     }
     info!("{package} installed");
     Ok(entry)

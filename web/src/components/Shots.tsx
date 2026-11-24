@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { ExternalLink, X } from "lucide-react";
 import type { Shot } from "../api/generated/Shot";
 import { OpenLinkContext } from "./Markdown";
+import { useT } from "../i18n";
 
 export const shotUrl = (shot: Shot) => `/api/shots/${shot.id}`;
 
@@ -22,13 +23,14 @@ export function ShotViewerProvider({ children }: { children: ReactNode }) {
 
 export function ShotThumb({ shot, width, label }: { shot: Shot; width: number; label: string }) {
   const view = useContext(ViewShotContext);
+  const t = useT();
   return (
     <button
       type="button"
       className="shot-thumb"
       style={{ width, aspectRatio: `${shot.width} / ${shot.height}` }}
       onClick={() => view(shot)}
-      title={`${label} · ${shot.width}×${shot.height} — открыть`}
+      title={t("shot_thumb_title", { label, size: `${shot.width}×${shot.height}` })}
     >
       <img src={shotUrl(shot)} alt={label} loading="lazy" draggable={false} />
     </button>
@@ -37,6 +39,7 @@ export function ShotThumb({ shot, width, label }: { shot: Shot; width: number; l
 
 function ShotViewer({ shot, onClose }: { shot: Shot; onClose(): void }) {
   const openLink = useContext(OpenLinkContext);
+  const t = useT();
   const url = shotUrl(shot);
 
   // Esc closes the viewer first (capture phase: the panel's own Esc would hide the overlay).
@@ -59,16 +62,16 @@ function ShotViewer({ shot, onClose }: { shot: Shot; onClose(): void }) {
   };
 
   return (
-    <div className="shot-viewer" role="dialog" aria-label="Кадр игры" onClick={onClose}>
-      <img src={url} alt="Кадр игры" onClick={(e) => e.stopPropagation()} draggable={false} />
+    <div className="shot-viewer" role="dialog" aria-label={t("game_frame")} onClick={onClose}>
+      <img src={url} alt={t("game_frame")} onClick={(e) => e.stopPropagation()} draggable={false} />
       <div className="shot-viewer-bar" onClick={(e) => e.stopPropagation()}>
         <span className="shot-viewer-size">
           {shot.width}×{shot.height}
         </span>
-        <button type="button" className="icon-btn" onClick={openOutside} title="Открыть в браузере">
+        <button type="button" className="icon-btn" onClick={openOutside} title={t("open_in_browser")}>
           <ExternalLink size={16} />
         </button>
-        <button type="button" className="icon-btn" onClick={onClose} title="Закрыть (Esc)">
+        <button type="button" className="icon-btn" onClick={onClose} title={t("close_esc")}>
           <X size={16} />
         </button>
       </div>

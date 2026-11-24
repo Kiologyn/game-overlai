@@ -5,21 +5,19 @@ import { useState } from "react";
 import { Copy, RefreshCw, Smartphone } from "lucide-react";
 import type { Connection } from "../api/connection";
 import { useUiState } from "../api/hooks";
+import { useT } from "../i18n";
 
 export function PhonePage({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
+  const t = useT();
   const lan = ui.lan;
   const [copied, setCopied] = useState(false);
 
   if (!lan) {
     return (
       <div className="phone-page">
-        <h1>Телефон</h1>
-        <p className="phone-note">
-          {ui.status === "open"
-            ? "Эта страница работает только на ПК, где запущен game-overlai."
-            : "Подключение к приложению…"}
-        </p>
+        <h1>{t("phone")}</h1>
+        <p className="phone-note">{ui.status === "open" ? t("phone_only_on_pc") : t("connecting_app")}</p>
       </div>
     );
   }
@@ -48,12 +46,9 @@ export function PhonePage({ conn }: { conn: Connection }) {
     <div className="phone-page">
       <div className="phone-head">
         <Smartphone size={20} aria-hidden />
-        <h1>Чат с телефона</h1>
+        <h1>{t("phone_title")}</h1>
       </div>
-      <p className="phone-note">
-        Телефон в той же сети Wi-Fi, что и этот ПК, открывает тот же чат: вопросы, история, кадры игры. Если вопрос
-        про экран, агент сам снимет игру, которая сейчас на экране ПК.
-      </p>
+      <p className="phone-note">{t("phone_intro")}</p>
 
       <label className="switch-row">
         <input
@@ -62,36 +57,34 @@ export function PhonePage({ conn }: { conn: Connection }) {
           onChange={(e) => conn.send({ type: "lan.set", enabled: e.target.checked })}
         />
         <span className="switch" aria-hidden />
-        <span>Доступ из локальной сети {lan.enabled ? "включён" : "выключен"}</span>
+        <span>{lan.enabled ? t("lan_on") : t("lan_off")}</span>
       </label>
 
       {lan.error && <div className="phone-error">{lan.error}</div>}
 
       {running && lan.addresses.length === 0 && (
-        <div className="phone-error">
-          Не нашёл адрес ПК в локальной сети. Подключите ПК к роутеру (Wi-Fi или кабель) и обновите страницу.
-        </div>
+        <div className="phone-error">{t("lan_no_address")}</div>
       )}
 
       {running && address && (
         <div className="phone-card">
           <div className="phone-qr" dangerouslySetInnerHTML={{ __html: address.qrSvg }} />
           <div className="phone-card-text">
-            <p>Наведите камеру телефона на код и откройте ссылку. Телефон запомнит вход.</p>
+            <p>{t("phone_scan")}</p>
             <div className="phone-url">
               <code>{address.url.replace(/\?t=.*/, "")}</code>
               <button type="button" className="btn" onClick={copy}>
-                <Copy size={13} aria-hidden /> {copied ? "Скопировано" : "Ссылка со входом"}
+                <Copy size={13} aria-hidden /> {copied ? t("copied") : t("copy_link")}
               </button>
             </div>
             <label className="phone-adapter">
-              <span>Сетевой интерфейс</span>
+              <span>{t("network_interface")}</span>
               <select value={chosenAddress ? chosenAddress.adapter : ""} onChange={(e) => choose(e.target.value || null)}>
                 <option value="">
-                  Автоматически ({lan.addresses[0].adapter}, {lan.addresses[0].ip})
+                  {t("interface_auto", { adapter: lan.addresses[0].adapter, ip: lan.addresses[0].ip })}
                 </option>
                 {recommended.length > 0 && (
-                  <optgroup label="Локальная сеть">
+                  <optgroup label={t("interfaces_local")}>
                     {recommended.map((a) => (
                       <option key={a.adapter + a.ip} value={a.adapter}>
                         {a.adapter} — {a.ip}
@@ -100,7 +93,7 @@ export function PhonePage({ conn }: { conn: Connection }) {
                   </optgroup>
                 )}
                 {others.length > 0 && (
-                  <optgroup label="Виртуальные, VPN и другие">
+                  <optgroup label={t("interfaces_other")}>
                     {others.map((a) => (
                       <option key={a.adapter + a.ip} value={a.adapter}>
                         {a.adapter} — {a.ip}
@@ -111,44 +104,33 @@ export function PhonePage({ conn }: { conn: Connection }) {
               </select>
             </label>
             {chosen !== null && !chosenAddress && (
-              <p className="phone-warn">
-                Выбранного интерфейса «{chosen}» сейчас нет (отключён или без адреса), код ведёт на автоматический.
-              </p>
+              <p className="phone-warn">{t("interface_missing", { adapter: chosen })}</p>
             )}
             {!address.recommended && (
-              <p className="phone-warn">
-                Это виртуальный, VPN или внешний адрес: телефон из домашней сети Wi-Fi, скорее всего, по нему не
-                откроет чат.
-              </p>
+              <p className="phone-warn">{t("interface_not_local")}</p>
             )}
             <p className="phone-clients">
-              {lan.clients === 0 ? "Устройств не подключено" : `Подключено устройств: ${lan.clients}`}
+              {lan.clients === 0 ? t("devices_none") : t("devices_connected", { count: lan.clients })}
             </p>
             <button
               type="button"
               className="btn"
               onClick={() => {
-                if (confirm("Все телефоны выйдут, и вход понадобится заново по новому коду. Сбросить?")) {
+                if (confirm(t("reset_access_confirm"))) {
                   conn.send({ type: "lan.resetToken" });
                 }
               }}
             >
-              <RefreshCw size={13} aria-hidden /> Сбросить доступ
+              <RefreshCw size={13} aria-hidden /> {t("reset_access")}
             </button>
           </div>
         </div>
       )}
 
       <ul className="phone-hints">
-        <li>
-          При первом включении Windows спросит, разрешить ли приложению доступ к сети: разрешите для частных сетей.
-          В общественных сетях (кафе, отель) доступ лучше не включать.
-        </li>
-        <li>
-          Если телефон не открывает страницу: проверьте, что он в той же сети, а сеть в Windows отмечена как
-          частная (Параметры → Сеть и Интернет → Wi-Fi → свойства сети).
-        </li>
-        <li>Соединение не шифруется: включайте доступ только в своей домашней сети.</li>
+        <li>{t("phone_hint_firewall")}</li>
+        <li>{t("phone_hint_private")}</li>
+        <li>{t("phone_hint_unencrypted")}</li>
       </ul>
     </div>
   );

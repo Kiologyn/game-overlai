@@ -382,9 +382,9 @@ async fn run_turn(state: Arc<AppState>, turn: Turn) {
     let (status, error) = match result {
         Ok(StopReason::EndTurn) | Ok(StopReason::Other(_)) => (MessageStatus::Done, None),
         Ok(StopReason::Cancelled) => (MessageStatus::Cancelled, None),
-        Ok(StopReason::Refusal) => (MessageStatus::Error, Some("Модель отказалась отвечать на этот запрос.".into())),
-        Ok(StopReason::MaxTokens) => (MessageStatus::Error, Some("Ответ оборвался: достигнут лимит длины.".into())),
-        Err(e) => (MessageStatus::Error, Some(humanize_error(&e, agent.spec.login_hint))),
+        Ok(StopReason::Refusal) => (MessageStatus::Error, Some(tr!("err_refusal"))),
+        Ok(StopReason::MaxTokens) => (MessageStatus::Error, Some(tr!("err_max_tokens"))),
+        Err(e) => (MessageStatus::Error, Some(humanize_error(&e, crate::i18n::text(agent.spec.login_hint)))),
     };
     let mut chat = state.chat.lock().unwrap();
     if chat.epoch != epoch {
@@ -467,7 +467,7 @@ async fn ensure_session(state: &Arc<AppState>, epoch: u64) -> Result<Session, St
     });
     let mut chat = state.chat.lock().unwrap();
     if chat.epoch != epoch {
-        return Err("чат закрыт".to_string());
+        return Err(tr!("err_chat_closed"));
     }
     if chat.session_id.as_deref() != Some(&id) {
         debug!("chat {chat_id}: agent session {id}");
@@ -567,15 +567,12 @@ fn humanize_error(e: &str, login_hint: &str) -> String {
     if ["login", "auth", "credential", "401", "unauthorized", "api key"].iter().any(|k| lower.contains(k)) {
         format!("{e}\n\n{login_hint}")
     } else if lower.contains("rate limit") || lower.contains("usage limit") || lower.contains("429") {
-        format!("Исчерпан лимит подписки, попробуйте позже.\n\n{e}")
+        format!("{}\n\n{e}", tr!("err_usage_limit"))
     } else if ["econnrefused", "etimedout", "enotfound", "econnreset", "fetch failed", "connection error", "network"]
         .iter()
         .any(|k| lower.contains(k))
     {
-        format!(
-            "Нет связи с серверами модели. Проверьте интернет или прокси: по умолчанию берётся системный \
-             прокси Windows, свой можно задать в config.toml, раздел [network].\n\n{e}"
-        )
+        format!("{}\n\n{e}", tr!("err_no_connection"))
     } else {
         e.to_string()
     }

@@ -18,6 +18,7 @@ import type { PermissionPrompt } from "../api/generated/PermissionPrompt";
 import type { ToolInfo } from "../api/generated/ToolInfo";
 import { Markdown } from "./Markdown";
 import { ShotThumb } from "./Shots";
+import { useT, type T } from "../i18n";
 
 /** Our MCP tool (src-tauri/src/mcp.rs). */
 const SCREENSHOT_TOOL = "screenshot_game";
@@ -58,10 +59,11 @@ export function MessageList({ messages, permissions, onPermission, emptyHint }: 
 }
 
 function UserMessage({ m }: { m: ChatMessage }) {
+  const t = useT();
   const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
   return (
     <div className="msg user">
-      {m.screenshot && <ShotThumb shot={m.screenshot} width={200} label="Кадр игры к вопросу" />}
+      {m.screenshot && <ShotThumb shot={m.screenshot} width={200} label={t("shot_for_question")} />}
       <div className="bubble">{text}</div>
       {m.error && (
         <div className="note with-icon">
@@ -74,6 +76,7 @@ function UserMessage({ m }: { m: ChatMessage }) {
 }
 
 function AssistantMessage({ m }: { m: ChatMessage }) {
+  const t = useT();
   const streaming = m.status === "streaming";
   const hasText = m.parts.some((p) => p.type === "text" && p.text.trim());
   return (
@@ -82,7 +85,7 @@ function AssistantMessage({ m }: { m: ChatMessage }) {
         <PartView key={i} part={p} live={streaming && i === m.parts.length - 1} />
       ))}
       {streaming && !hasText && <Typing />}
-      {m.status === "cancelled" && <div className="note">Остановлено</div>}
+      {m.status === "cancelled" && <div className="note">{t("stopped")}</div>}
       {m.status === "error" && m.error && <div className="error-box">{m.error}</div>}
     </div>
   );
@@ -100,12 +103,13 @@ function PartView({ part, live }: { part: Part; live: boolean }) {
 }
 
 function Thought({ text, live }: { text: string; live: boolean }) {
+  const t = useT();
   return (
     <details className="thought">
       <summary>
         <ChevronRight size={14} className="chev" aria-hidden />
         <Brain size={13} aria-hidden />
-        {live ? "Думает…" : "Размышления"}
+        {live ? t("thinking") : t("thoughts")}
       </summary>
       <div className="thought-text">{text}</div>
     </details>
@@ -119,35 +123,37 @@ function toolIcon(tool: ToolInfo) {
   return <Wrench size={13} aria-hidden />;
 }
 
-function toolLabel(tool: ToolInfo) {
-  if (tool.title === SCREENSHOT_TOOL) return "Смотрит на экран игры";
-  return tool.title || "Инструмент";
+function toolLabel(tool: ToolInfo, t: T) {
+  if (tool.title === SCREENSHOT_TOOL) return t("tool_screenshot");
+  return tool.title || t("tool");
 }
 
 function ToolChip({ tool }: { tool: ToolInfo }) {
+  const t = useT();
   const state =
     tool.status === "done" ? (
-      <Check size={13} className="ok" aria-label="готово" />
+      <Check size={13} className="ok" aria-label={t("tool_done")} />
     ) : tool.status === "failed" ? (
-      <X size={13} className="bad" aria-label="ошибка" />
+      <X size={13} className="bad" aria-label={t("tool_failed")} />
     ) : (
-      <LoaderCircle size={13} className="spin" aria-label="выполняется" />
+      <LoaderCircle size={13} className="spin" aria-label={t("tool_running")} />
     );
   return (
     <>
       <div className="tool" title={tool.title}>
         {toolIcon(tool)}
-        <span className="tool-title">{toolLabel(tool)}</span>
+        <span className="tool-title">{toolLabel(tool, t)}</span>
         {state}
       </div>
-      {tool.shot && <ShotThumb shot={tool.shot} width={160} label="Кадр, который увидел агент" />}
+      {tool.shot && <ShotThumb shot={tool.shot} width={160} label={t("shot_seen_by_agent")} />}
     </>
   );
 }
 
 function Typing() {
+  const t = useT();
   return (
-    <div className="typing" aria-label="Модель отвечает">
+    <div className="typing" aria-label={t("model_answering")}>
       <span />
       <span />
       <span />
@@ -156,12 +162,13 @@ function Typing() {
 }
 
 function PermissionCard({ prompt, onRespond }: { prompt: PermissionPrompt; onRespond: Props["onPermission"] }) {
+  const t = useT();
   return (
     <div className="permission">
       <div className="permission-title">
         <ShieldQuestion size={15} aria-hidden />
         <span>
-          Агент просит разрешения: <b>{prompt.title}</b>
+          {t("permission_request")} <b>{prompt.title}</b>
         </span>
       </div>
       <div className="permission-actions">

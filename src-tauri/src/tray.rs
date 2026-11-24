@@ -18,17 +18,27 @@ use crate::state::AppState;
 
 pub const TRAY_ID: &str = "main";
 
-/// "Access from the phone" item: kept in sync when access is changed on the /phone page.
-static LAN_ITEM: OnceLock<CheckMenuItem<tauri::Wry>> = OnceLock::new();
-/// Items that show the hotkeys (renamed when the settings change them).
-static HOTKEY_ITEMS: OnceLock<(MenuItem<tauri::Wry>, MenuItem<tauri::Wry>)> = OnceLock::new();
+/// The menu items, renamed when the hotkeys or the language change; the "access from the phone"
+/// check mark follows changes made on the /phone page.
+struct Items {
+    quick: MenuItem<tauri::Wry>,
+    chat: MenuItem<tauri::Wry>,
+    browser: MenuItem<tauri::Wry>,
+    lan: CheckMenuItem<tauri::Wry>,
+    phone: MenuItem<tauri::Wry>,
+    pause: CheckMenuItem<tauri::Wry>,
+    settings: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+}
+
+static ITEMS: OnceLock<Items> = OnceLock::new();
 
 fn quick_text(key: &str) -> String {
-    format!("Быстрый вопрос\t{}", pretty_hotkey(key))
+    tr!("tray_quick", key = pretty_hotkey(key))
 }
 
 fn chat_text(key: &str) -> String {
-    format!("Открыть чат\t{}", pretty_hotkey(key))
+    tr!("tray_chat", key = pretty_hotkey(key))
 }
 
 pub fn build(app: &tauri::App) -> tauri::Result<()> {
@@ -36,13 +46,12 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let keys = st.cfg().hotkeys;
     let quick = MenuItem::with_id(app, "quick", quick_text(&keys.quick), true, None::<&str>)?;
     let chat = MenuItem::with_id(app, "chat", chat_text(&keys.chat), true, None::<&str>)?;
-    let _ = HOTKEY_ITEMS.set((quick.clone(), chat.clone()));
-    let settings = MenuItem::with_id(app, "settings", "Настройки…", true, None::<&str>)?;
-    let browser = MenuItem::with_id(app, "browser", "Открыть чат в браузере", true, None::<&str>)?;
-    let lan_on = CheckMenuItem::with_id(app, "lan", "Доступ с телефона (Wi-Fi)", true, lan::enabled(&st), None::<&str>)?;
-    let phone = MenuItem::with_id(app, "phone", "Телефон: QR-код…", true, None::<&str>)?;
-    let pause = CheckMenuItem::with_id(app, "pause", "Пауза горячих клавиш", true, false, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", tr!("tray_settings"), true, None::<&str>)?;
+    let browser = MenuItem::with_id(app, "browser", tr!("tray_browser"), true, None::<&str>)?;
+    let lan_on = CheckMenuItem::with_id(app, "lan", tr!("tray_lan"), true, lan::enabled(&st), None::<&str>)?;
+    let phone = MenuItem::with_id(app, "phone", tr!("tray_phone"), true, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(app, "pause", tr!("tray_pause"), true, false, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", tr!("tray_quit"), true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -62,7 +71,16 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
 
     let pause_item = pause.clone();
     let lan_item = lan_on.clone();
-    let _ = LAN_ITEM.set(lan_on.clone());
+    let _ = ITEMS.set(Items {
+        quick: quick.clone(),
+        chat: chat.clone(),
+        browser: browser.clone(),
+        lan: lan_on.clone(),
+        phone: phone.clone(),
+        pause: pause.clone(),
+        settings: settings.clone(),
+        quit: quit.clone(),
+    });
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().cloned().expect("app icon"))
         .tooltip(tooltip(&st))
@@ -101,29 +119,33 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
 /// Windows truncates tray tooltips at 127 characters: keep every line short.
 fn tooltip(st: &AppState) -> String {
     let agent = st.agent_status.lock().unwrap().clone();
-    let agent_line = match agent.state {
-        AgentState::Ready => format!("{}: готов", agent.agent),
-        AgentState::Starting => format!("{}: запускается…", agent.agent),
-        AgentState::Installing => format!("{}: установка…", agent.agent),
-        AgentState::Error => format!("{}: недоступен", agent.agent),
+    let state = match agent.state {
+        AgentState::Ready => tr!("agent_ready"),
+        AgentState::Starting => tr!("agent_starting"),
+        AgentState::Installing => tr!("agent_installing"),
+        AgentState::Error => tr!("agent_error"),
     };
+    let agent_line = tr!("agent_state_line", agent = agent.agent, state = state);
     let mut lines = vec![format!("game-overlai · {agent_line}")];
     if let Some(Usage { five_hour: Some(five), seven_day, .. }) = st.usage.lock().unwrap().clone() {
-        let week = seven_day.map(|w| format!(" · неделя {:.0}%", w * 100.0)).unwrap_or_default();
-        lines.push(format!("Лимит 5 ч: {:.0}%{week}", five * 100.0));
+        let mut line = tr!("tray_usage", percent = format!("{:.0}", five * 100.0));
+        if let Some(w) = seven_day {
+            line = format!("{line} · {}", tr!("tray_usage_week", percent = format!("{:.0}", w * 100.0)));
+        }
+        lines.push(line);
     }
     if lan::enabled(st) {
-        lines.push("Доступ с телефона включён".into());
+        lines.push(tr!("tray_lan_on"));
     }
     if st.hotkeys_paused.load(std::sync::atomic::Ordering::SeqCst) {
-        lines.push("Горячие клавиши на паузе".into());
+        lines.push(tr!("tray_paused"));
     } else {
         let failed = st.failed_hotkeys.lock().unwrap();
         if failed.is_empty() {
             let keys = st.cfg().hotkeys;
-            lines.push(format!("{} вопрос · {} чат", pretty_hotkey(&keys.quick), pretty_hotkey(&keys.chat)));
+            lines.push(tr!("tray_keys", quick = pretty_hotkey(&keys.quick), chat = pretty_hotkey(&keys.chat)));
         } else {
-            lines.push(format!("Заняты: {}", failed.join(", ")));
+            lines.push(tr!("tray_keys_taken", keys = failed.join(", ")));
         }
     }
     let mut s = lines.join("\n");
@@ -157,12 +179,23 @@ pub fn open_page(app: &AppHandle, page: &str) {
 
 /// Hotkeys changed in the settings (or were paused): menu labels and tooltip.
 pub fn refresh_hotkeys(app: &AppHandle) {
+    refresh_menu(app);
+}
+
+/// Every menu label and the tooltip again: the hotkeys or the language changed.
+pub fn refresh_menu(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         let keys = handle.state::<Arc<AppState>>().cfg().hotkeys;
-        if let Some((quick, chat)) = HOTKEY_ITEMS.get() {
-            let _ = quick.set_text(quick_text(&keys.quick));
-            let _ = chat.set_text(chat_text(&keys.chat));
+        if let Some(items) = ITEMS.get() {
+            let _ = items.quick.set_text(quick_text(&keys.quick));
+            let _ = items.chat.set_text(chat_text(&keys.chat));
+            let _ = items.browser.set_text(tr!("tray_browser"));
+            let _ = items.lan.set_text(tr!("tray_lan"));
+            let _ = items.phone.set_text(tr!("tray_phone"));
+            let _ = items.pause.set_text(tr!("tray_pause"));
+            let _ = items.settings.set_text(tr!("tray_settings"));
+            let _ = items.quit.set_text(tr!("tray_quit"));
         }
         refresh_tooltip(&handle);
     });
@@ -179,8 +212,8 @@ pub fn refresh_lan(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         let st = handle.state::<Arc<AppState>>();
-        if let Some(item) = LAN_ITEM.get() {
-            let _ = item.set_checked(lan::enabled(&st));
+        if let Some(items) = ITEMS.get() {
+            let _ = items.lan.set_checked(lan::enabled(&st));
         }
         refresh_tooltip(&handle);
     });

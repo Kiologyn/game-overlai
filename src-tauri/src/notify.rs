@@ -21,13 +21,13 @@ pub fn answer_ready(state: &AppState, title: Option<&str>, answer: &str) {
         return;
     }
     let key = pretty_hotkey(&state.cfg().hotkeys.chat);
-    let body = format!("{}\n{key} — открыть чат", excerpt(answer, 140));
-    show(state, title.unwrap_or("Ответ готов"), &body);
+    let body = format!("{}\n{}", excerpt(answer, 140), tr!("notify_open_chat", key = key));
+    show(state, title.unwrap_or(crate::i18n::text("notify_answer_ready")), &body);
 }
 
 pub fn answer_failed(state: &AppState, error: &str) {
     if wanted(state) {
-        show(state, "Ответ не получен", &excerpt(error, 160));
+        show(state, crate::i18n::text("notify_answer_failed"), &excerpt(error, 160));
     }
 }
 
@@ -36,7 +36,8 @@ pub fn permission(state: &AppState, what: &str) {
         return;
     }
     let key = pretty_hotkey(&state.cfg().hotkeys.chat);
-    show(state, "Агент ждёт разрешения", &format!("{}\n{key} — ответить", excerpt(what, 140)));
+    let body = format!("{}\n{}", excerpt(what, 140), tr!("notify_respond", key = key));
+    show(state, crate::i18n::text("notify_permission"), &body);
 }
 
 fn show(state: &AppState, title: &str, body: &str) {

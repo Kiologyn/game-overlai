@@ -226,7 +226,7 @@ fn dispatch(
                             Err(e) => Err(e.to_string()),
                         }
                     }
-                    Restore::Unsupported => Err(format!("{} не умеет продолжать сессии", spec.name)),
+                    Restore::Unsupported => Err(tr!("err_no_resume", agent = spec.name)),
                 };
                 let _ = reply.send(result);
                 Ok(())
@@ -507,7 +507,7 @@ fn permission_prompt(req: &RequestPermissionRequest) -> PermissionPrompt {
         .collect();
     PermissionPrompt {
         id: uuid::Uuid::new_v4().simple().to_string(),
-        title: req.tool_call.fields.title.as_deref().map(tool_title).unwrap_or_else(|| "Действие агента".into()),
+        title: req.tool_call.fields.title.as_deref().map(tool_title).unwrap_or_else(|| tr!("agent_action")),
         options,
     }
 }

@@ -5,15 +5,17 @@ import type { ChatSummary } from "../api/generated/ChatSummary";
 import type { GameProfile } from "../api/generated/GameProfile";
 import type { AgentStatus } from "../api/generated/AgentStatus";
 import type { Usage } from "../api/generated/Usage";
+import { htmlLang, useT, type T } from "../i18n";
 
-function formatReset(unixSeconds: number | null): string {
+function formatReset(unixSeconds: number | null, t: T): string {
   if (!unixSeconds) return "";
-  const d = new Date(unixSeconds * 1000);
-  return ` · сброс в ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  const time = new Date(unixSeconds * 1000).toLocaleTimeString(htmlLang(), { hour: "2-digit", minute: "2-digit" });
+  return ` · ${t("usage_resets_at", { time })}`;
 }
 
 /** Subscription usage (5-hour window), with the weekly one in the tooltip. */
 export function UsageBadge({ usage }: { usage: Usage | null }) {
+  const t = useT();
   if (!usage || usage.fiveHour === null) return null;
   const five = Math.round(usage.fiveHour * 100);
   const week = usage.sevenDay === null ? null : Math.round(usage.sevenDay * 100);
@@ -21,7 +23,7 @@ export function UsageBadge({ usage }: { usage: Usage | null }) {
   return (
     <span
       className={`usage ${level}`}
-      title={`Лимит подписки: 5 часов — ${five}%${formatReset(usage.fiveHourResetsAt)}${week === null ? "" : `; неделя — ${week}%`}`}
+      title={`${t("usage_five_hours", { percent: five })}${formatReset(usage.fiveHourResetsAt, t)}${week === null ? "" : `; ${t("usage_week", { percent: week })}`}`}
     >
       <span className="usage-bar">
         <span style={{ width: `${Math.min(100, five)}%` }} />
@@ -31,19 +33,21 @@ export function UsageBadge({ usage }: { usage: Usage | null }) {
   );
 }
 
+/** String codes of the agent states. */
 const AGENT_TEXT: Record<AgentStatus["state"], string> = {
-  ready: "готов",
-  starting: "запускается…",
-  installing: "устанавливается…",
-  error: "недоступен",
+  ready: "agent_ready",
+  starting: "agent_starting",
+  installing: "agent_installing",
+  error: "agent_error",
 };
 
 export function AgentDot({ agent }: { agent: AgentStatus | null }) {
+  const t = useT();
   if (!agent) return null;
   return (
     <span
       className={`agent-dot ${agent.state}`}
-      title={`${agent.agent}: ${AGENT_TEXT[agent.state]}${agent.detail ? ` — ${agent.detail}` : ""}`}
+      title={`${t("agent_state_line", { agent: agent.agent, state: t(AGENT_TEXT[agent.state]) })}${agent.detail ? ` — ${agent.detail}` : ""}`}
     />
   );
 }
@@ -64,6 +68,7 @@ interface HeaderProps {
 
 export function ChatHeader(props: HeaderProps) {
   const { title, usage, agent, chats, chatId, games, onNewChat, onOpenChat, onDeleteChat, onDragStart } = props;
+  const t = useT();
   const [historyOpen, setHistoryOpen] = useState(false);
   return (
     <div
@@ -76,15 +81,15 @@ export function ChatHeader(props: HeaderProps) {
       }}
     >
       <AgentDot agent={agent} />
-      <span className="chat-title">{title ?? "Новый чат"}</span>
+      <span className="chat-title">{title ?? t("new_chat")}</span>
       <UsageBadge usage={usage} />
       <div className="overlay-history">
         <button
           type="button"
           className={`icon-btn${historyOpen ? " selected" : ""}`}
           onClick={() => setHistoryOpen((open) => !open)}
-          title="История чатов"
-          aria-label="История чатов"
+          title={t("chat_history")}
+          aria-label={t("chat_history")}
           aria-expanded={historyOpen}
         >
           <History size={16} />
@@ -103,7 +108,7 @@ export function ChatHeader(props: HeaderProps) {
           />
         )}
       </div>
-      <button type="button" className="icon-btn" onClick={onNewChat} title="Новый чат">
+      <button type="button" className="icon-btn" onClick={onNewChat} title={t("new_chat")}>
         <Plus size={16} />
       </button>
     </div>
@@ -121,9 +126,11 @@ interface MenuProps {
 
 /** History dropdown of the overlay panel: search, chats grouped by game. */
 function HistoryMenu({ chats, games, chatId, onOpenChat, onDeleteChat, onClose }: MenuProps) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
-  const groups = useMemo(() => groupChats(chats, query, games), [chats, query, games]);
+  const noGame = t("no_game");
+  const groups = useMemo(() => groupChats(chats, query, games, noGame), [chats, query, games, noGame]);
 
   useEffect(() => {
     // Esc closes the menu, not the panel (capture phase: the panel hides on Esc itself).
@@ -148,13 +155,13 @@ function HistoryMenu({ chats, games, chatId, onOpenChat, onDeleteChat, onClose }
   }, [onClose]);
 
   return (
-    <div className="overlay-history-menu" ref={ref} role="region" aria-label="История чатов по играм">
+    <div className="overlay-history-menu" ref={ref} role="region" aria-label={t("chat_history_by_game")}>
       <label className="history-search overlay">
         <Search size={14} aria-hidden />
-        <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по чатам" />
+        <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search_chats")} />
       </label>
       {groups.length === 0 ? (
-        <div className="history-empty">{chats.length ? "Ничего не найдено" : "Чаты появятся здесь"}</div>
+        <div className="history-empty">{chats.length ? t("nothing_found") : t("chats_appear_here")}</div>
       ) : (
         groups.map((group) => (
           <section className="history-group" key={group.key}>
@@ -175,8 +182,8 @@ function HistoryMenu({ chats, games, chatId, onOpenChat, onDeleteChat, onClose }
                 <button
                   type="button"
                   className="history-delete"
-                  title="Удалить чат"
-                  aria-label={`Удалить чат ${chat.title}`}
+                  title={t("delete_chat")}
+                  aria-label={t("delete_chat_named", { title: chat.title })}
                   onClick={() => onDeleteChat(chat.id)}
                 >
                   <Trash2 size={14} />
@@ -192,13 +199,11 @@ function HistoryMenu({ chats, games, chatId, onOpenChat, onDeleteChat, onClose }
 
 /** Shown above the input when the agent can't answer right now. */
 export function AgentNotice({ agent }: { agent: AgentStatus | null }) {
+  const t = useT();
   if (!agent || agent.state === "ready") return null;
   if (agent.state === "error") {
-    return <div className="agent-notice bad">{agent.detail ?? `${agent.agent} недоступен`}</div>;
+    return <div className="agent-notice bad">{agent.detail ?? t("agent_unavailable", { agent: agent.agent })}</div>;
   }
-  return (
-    <div className="agent-notice">
-      {agent.detail ?? `${agent.agent} ${AGENT_TEXT[agent.state]}`}
-    </div>
-  );
+  const doing = agent.state === "installing" ? "agent_is_installing" : "agent_is_starting";
+  return <div className="agent-notice">{agent.detail ?? t(doing, { agent: agent.agent })}</div>;
 }

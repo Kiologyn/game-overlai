@@ -35,6 +35,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
 
     let mut initial = vec![
         ServerMsg::Hello { version: env!("CARGO_PKG_VERSION").into(), client: kind },
+        ServerMsg::Language { language: crate::i18n::language() },
         chat::snapshot(&ctx.state),
         chat::chat_list(&ctx.state),
         games::list(&ctx.state),
@@ -156,6 +157,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         | ClientMsg::UiOpenUrl { .. }
         | ClientMsg::SettingsSave { .. }
         | ClientMsg::SettingsAutostart { .. }
+        | ClientMsg::SettingsLanguage { .. }
         | ClientMsg::SettingsCapturing { .. }
         | ClientMsg::SettingsResetPanelPlaces
         | ClientMsg::AppRestart
@@ -168,6 +170,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         ClientMsg::LanChooseAdapter { adapter } => lan::choose_adapter(&ctx.state, adapter),
         ClientMsg::SettingsSave { values } => settings::save(&ctx.state, values),
         ClientMsg::SettingsAutostart { enabled } => settings::set_autostart(&ctx.state, enabled),
+        ClientMsg::SettingsLanguage { language } => settings::set_language(&ctx.state, language),
         ClientMsg::SettingsCapturing { active } => {
             overlay::run_on_main(&ctx.app, move |app| crate::hotkeys::set_capturing(app, active))
         }

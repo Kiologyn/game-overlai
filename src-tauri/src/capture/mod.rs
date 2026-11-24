@@ -65,17 +65,17 @@ impl Capturer {
     /// For the main thread (hotkey): waits at most `timeout`.
     pub fn grab_blocking(&self, hwnd: isize, timeout: Duration) -> Result<Frame, String> {
         let (reply, rx) = mpsc::channel();
-        self.jobs.send(Job { hwnd, reply }).map_err(|_| "захват недоступен".to_string())?;
-        rx.recv_timeout(timeout).map_err(|_| "захват не успел".to_string())?
+        self.jobs.send(Job { hwnd, reply }).map_err(|_| tr!("err_capture_unavailable"))?;
+        rx.recv_timeout(timeout).map_err(|_| tr!("err_capture_timeout"))?
     }
 
     pub async fn grab(&self, hwnd: isize) -> Result<Frame, String> {
         let (reply, rx) = mpsc::channel();
-        self.jobs.send(Job { hwnd, reply }).map_err(|_| "захват недоступен".to_string())?;
+        self.jobs.send(Job { hwnd, reply }).map_err(|_| tr!("err_capture_unavailable"))?;
         tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(5)))
             .await
-            .map_err(|_| "захват прервался".to_string())?
-            .map_err(|_| "захват не успел".to_string())?
+            .map_err(|_| tr!("err_capture_interrupted"))?
+            .map_err(|_| tr!("err_capture_timeout"))?
     }
 }
 
@@ -108,7 +108,7 @@ fn worker(jobs: mpsc::Receiver<Job>) {
                 }
                 f.message
             }),
-            None => Err("видеокарта недоступна для захвата".into()),
+            None => Err(tr!("err_no_gpu")),
         };
         match &result {
             Ok(f) => debug!("captured {f:?} in {} ms", started.elapsed().as_millis()),

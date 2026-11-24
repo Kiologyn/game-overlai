@@ -11,13 +11,14 @@ export interface ChatGroup {
   chats: ChatSummary[];
 }
 
-/** Chats matching `query` (title or game), grouped by game in list order (newest first). */
-export function groupChats(chats: ChatSummary[], query: string, games: GameProfile[]): ChatGroup[] {
+/** Chats matching `query` (title or game), grouped by game in list order (newest first).
+ * `noGame`: the label of chats without a game. */
+export function groupChats(chats: ChatSummary[], query: string, games: GameProfile[], noGame: string): ChatGroup[] {
   const needle = query.trim().toLocaleLowerCase();
   const groups = new Map<string, ChatGroup>();
   for (const chat of chats) {
     const exe = chat.game?.exe || null;
-    const label = gameLabel(chat.game, games) || "Без игры";
+    const label = gameLabel(chat.game, games) || noGame;
     const key = exe ? exe.toLowerCase() : `title:${label}`;
     if (needle && !`${chat.title} ${label} ${chat.game?.title ?? ""}`.toLocaleLowerCase().includes(needle)) continue;
     const group = groups.get(key);

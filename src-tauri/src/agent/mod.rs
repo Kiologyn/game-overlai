@@ -225,8 +225,8 @@ impl AgentHandle {
 
     async fn call<T>(&self, make: impl FnOnce(oneshot::Sender<Result<T, String>>) -> Cmd) -> Result<T, String> {
         let (reply, rx) = oneshot::channel();
-        self.tx.send(make(reply)).map_err(|_| "агент остановлен".to_string())?;
-        rx.await.unwrap_or_else(|_| Err("агент перезапустился во время ответа".into()))
+        self.tx.send(make(reply)).map_err(|_| tr!("err_agent_stopped"))?;
+        rx.await.unwrap_or_else(|_| Err(tr!("err_agent_restarted")))
     }
 
     pub async fn new_session(&self, cwd: PathBuf, system_prompt: String) -> Result<String, String> {
@@ -290,11 +290,7 @@ async fn supervise(
         // `[network] require_proxy_for`: this user must never reach the agent directly, so wait
         // for a proxy instead of starting.
         if require_proxy && proxy.url.is_none() {
-            let msg = format!(
-                "{} по настройкам работает только через прокси, а прокси сейчас не найден. Включите \
-                 системный прокси — агент запустится сам через несколько секунд.",
-                spec.name
-            );
+            let msg = tr!("agent_needs_proxy", agent = spec.name);
             if !waiting_for_proxy {
                 warn!("agent {}: no proxy ({}); not starting it without one", spec.id, proxy.describe());
                 shared.status(AgentState::Error, Some(msg.clone()));
@@ -315,7 +311,7 @@ async fn supervise(
         }
 
         if !install::is_installed(&agents_dir, spec) {
-            shared.status(AgentState::Installing, Some(format!("Устанавливаю адаптер {}…", spec.name)));
+            shared.status(AgentState::Installing, Some(tr!("agent_installing_adapter", agent = spec.name)));
         }
         let dir = agents_dir.clone();
         let install_proxy = proxy.clone();
@@ -326,7 +322,7 @@ async fn supervise(
             other => {
                 let msg = match other {
                     Ok(Err(msg)) => msg,
-                    _ => "установка адаптера прервалась".into(),
+                    _ => tr!("err_install_interrupted"),
                 };
                 warn!("agent {} unavailable: {msg}", spec.id);
                 shared.status(AgentState::Error, Some(msg.clone()));
@@ -354,7 +350,7 @@ async fn supervise(
             return;
         }
         if shared.restart_now.swap(false, Ordering::SeqCst) {
-            shared.status(AgentState::Starting, Some("Агент перезапускается…".into()));
+            shared.status(AgentState::Starting, Some(tr!("agent_restarting")));
             continue;
         }
         backoff = if started.elapsed() > Duration::from_secs(30) {
@@ -362,7 +358,7 @@ async fn supervise(
         } else {
             (backoff * 2).min(Duration::from_secs(30))
         };
-        shared.status(AgentState::Starting, Some("Агент перезапускается…".into()));
+        shared.status(AgentState::Starting, Some(tr!("agent_restarting")));
         tokio::time::sleep(backoff).await;
     }
 }

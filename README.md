@@ -60,6 +60,7 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
 | `src-tauri/src/protocol.rs` | WebSocket protocol; TS types are generated from it |
 | `src-tauri/src/proxy.rs`, `config.rs`, `tray.rs`, `hotkeys.rs` | network proxy, settings, tray, global hotkeys |
 | `src-tauri/src/settings.rs`, `notify.rs` | backend of the settings page, start with Windows; notifications |
+| `src-tauri/src/i18n.rs`, `web/src/i18n.ts`, `web/src/locales/` | interface languages: string codes → `<language>.json` (en, ru, es, zh, ja), shared by Rust and the UI |
 | `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/` = browser chat, `/phone`, `/settings` |
 | `spikes/` | phase 0 prototypes (ACP, capture, overlay), kept for reference |
 
@@ -70,14 +71,19 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
 - Before committing: `cargo test`, `cargo clippy` (no warnings) in `src-tauri/`, `npm run build` in `web/`.
 - No DLL injection or hooks into game processes (anti-cheat): the overlay is a separate topmost window,
   frames come from Windows Graphics Capture.
-- UI: neutral dark theme, no blue. UI text is in Russian.
+- UI: neutral dark theme, no blue.
+- UI text: never inline. Use a string code — `t("code")` (`useT()`) in the UI, `tr!("code", name = value)` in
+  Rust — and add it to every `web/src/locales/*.json` (English is the base; `{name}` placeholders). `cargo test`
+  checks that every used code exists and every language has every string with the same placeholders.
+  Logs and the agent's system prompt stay in English.
 
 ## Runtime files
 
 - Settings: `%APPDATA%\game-overlai\config.toml` (created on first run; missing keys = defaults; the settings
   page rewrites it). `agent = "claude"` or `"codex"`; `[notifications] enabled` — a Windows notification when
   an answer to a question from the overlay is ready (or the agent asks for a permission) while the panel is
-  hidden. Start with Windows = the `game-overlai` value under `HKCU\...\CurrentVersion\Run`.
+  hidden. `language = "ru"` — interface language (en, ru, es, zh, ja; default: the Windows one if the app
+  has it, else English); the settings page switches it at once, for every UI, the tray and notifications. Start with Windows = the `game-overlai` value under `HKCU\...\CurrentVersion\Run`.
   `[network] proxy = "system"` takes the Windows proxy (incl. PAC), else HTTP(S)_PROXY, else direct;
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
   `[agent_options.<agent>]` — the model / effort picked in the input row (button left of ↑), applied to

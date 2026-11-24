@@ -14,9 +14,11 @@ import { OpenLinkContext } from "../components/Markdown";
 import { MessageList } from "../components/MessageList";
 import { ShotViewerProvider } from "../components/Shots";
 import { PageTooltip } from "./PageTooltip";
+import { useT } from "../i18n";
 
 export function Panel({ conn }: { conn: Connection }) {
   const ui = useUiState(conn);
+  const t = useT();
   const [mode, setMode] = useState<PanelMode>("compact");
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +131,7 @@ export function Panel({ conn }: { conn: Connection }) {
                 messages={ui.messages}
                 permissions={ui.permissions}
                 onPermission={(id, optionId) => conn.send({ type: "permission.respond", id, optionId })}
-                emptyHint="Новый чат. Спросите что-нибудь про игру."
+                emptyHint={t("panel_empty_hint")}
               />
               <AgentNotice agent={ui.agent} />
             </>
@@ -151,17 +153,17 @@ export function Panel({ conn }: { conn: Connection }) {
             placeholder={
               mode === "compact"
                 ? agentDown
-                  ? `${ui.agent?.agent ?? "Агент"} недоступен — подробности в чате`
-                  : "Быстрый вопрос — новый чат…"
-                : "Сообщение…"
+                  ? t("agent_unavailable_see_chat", { agent: ui.agent?.agent ?? t("agent") })
+                  : t("quick_placeholder")
+                : t("message_placeholder")
             }
             inputRef={inputRef}
             onDragStart={mode === "compact" ? startDrag : undefined}
           />
-          {ui.status !== "open" && <div className="offline" title="Нет связи с приложением" />}
+          {ui.status !== "open" && <div className="offline" title={t("no_app_connection")} />}
           {zoomShown && (
             <div className="zoom-badge" role="status">
-              {Math.round(ui.overlay.zoom * 100)}%<span> · Ctrl+0 — сброс</span>
+              {Math.round(ui.overlay.zoom * 100)}%<span> · {t("zoom_reset")}</span>
             </div>
           )}
           <PageTooltip />
