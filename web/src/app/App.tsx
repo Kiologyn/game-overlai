@@ -159,6 +159,9 @@ export function App({ conn }: { conn: Connection }) {
                 profile={gameProfile}
                 chats={gameChats}
                 chatId={ui.chatId}
+                widgets={ui.widgets.filter((w) => sameExe(w.exe, gameProfile.exe))}
+                memoryOn={ui.settings ? ui.settings.values.progressMemory : null}
+                send={(msg) => conn.send(msg)}
                 onSave={(p) =>
                   conn.send({
                     type: "game.update",

@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 import {
+  Bookmark,
   Brain,
   Camera,
+  Eye,
+  StickyNote,
+  ZoomIn,
   CameraOff,
   Check,
   ChevronRight,
@@ -20,8 +24,19 @@ import { Markdown } from "./Markdown";
 import { ShotThumb } from "./Shots";
 import { useT, type T } from "../i18n";
 
-/** Our MCP tool (src-tauri/src/mcp.rs). */
-const SCREENSHOT_TOOL = "screenshot_game";
+/** Our MCP tools (src-tauri/src/mcp.rs) and the string codes of their labels. */
+const OUR_TOOLS: Record<string, string> = {
+  screenshot_game: "tool_screenshot",
+  zoom_screen: "tool_zoom",
+  watch_screen: "tool_watch",
+  progress_add: "tool_progress",
+  progress_update: "tool_progress",
+  progress_remove: "tool_progress_remove",
+  widget_list: "tool_widget_list",
+  widget_create: "tool_widget_create",
+  widget_update: "tool_widget_update",
+  widget_delete: "tool_widget_delete",
+};
 
 interface Props {
   messages: ChatMessage[];
@@ -117,14 +132,19 @@ function Thought({ text, live }: { text: string; live: boolean }) {
 }
 
 function toolIcon(tool: ToolInfo) {
-  if (tool.title === SCREENSHOT_TOOL) return <Camera size={13} aria-hidden />;
+  if (tool.title === "screenshot_game") return <Camera size={13} aria-hidden />;
+  if (tool.title === "zoom_screen") return <ZoomIn size={13} aria-hidden />;
+  if (tool.title === "watch_screen") return <Eye size={13} aria-hidden />;
+  if (tool.title.startsWith("progress_")) return <Bookmark size={13} aria-hidden />;
+  if (tool.title.startsWith("widget_")) return <StickyNote size={13} aria-hidden />;
   if (tool.kind === "search") return <Search size={13} aria-hidden />;
   if (tool.kind === "fetch") return <Globe size={13} aria-hidden />;
   return <Wrench size={13} aria-hidden />;
 }
 
 function toolLabel(tool: ToolInfo, t: T) {
-  if (tool.title === SCREENSHOT_TOOL) return t("tool_screenshot");
+  const ours = OUR_TOOLS[tool.title];
+  if (ours) return t(ours);
   return tool.title || t("tool");
 }
 

@@ -35,6 +35,24 @@ its name for the agent, standing instructions (spoilers, character, language...)
 and its chats. The agent gets the profile in the system prompt of a new session; a resumed
 session keeps its first system prompt (Claude Code), so a changed profile is sent with the next question.
 
+Progress memory (settings → Agent, on by default): the agent saves lasting facts about the user's
+progress per game (chapter, build, bosses beaten) with MCP tools, and every chat of that game gets
+them in its prompt. The game's page lists them ("Прогресс") to fix, add or delete.
+
+Agent tools (our MCP server): `screenshot_game`; `zoom_screen` — a region of the last screenshot at
+full resolution (small text); `watch_screen` — waits (≤ 50 s) until the screen changes or settles and
+returns a fresh frame; `progress_add/_update/_remove` (only while memory is on); `widget_list/_create/
+_update/_delete`.
+
+Widgets: cards the agent pins over a game's window (title, short Markdown, a checklist the user ticks,
+a countdown, and hidden JSON `data` the agent keeps progress in), kept per game. They show whenever that
+game is in the foreground, in one transparent topmost window over it that never takes the focus and
+lets clicks through outside the cards. A card moves by its title bar (stays inside the game window,
+snaps to its edges, place kept as a fraction of the window), its width changes by the bottom-right
+corner, the corner button makes it 50% see-through, the chevron folds it. The game's page lists and
+deletes them. `/widgets?exe=<game.exe>` previews a game's widgets in a browser tab (the layer itself is
+out of screenshots, like the panel, unless captures are allowed in the settings).
+
 Phone: tray → "Доступ с телефона (Wi-Fi)" turns on a second server for the local network (port 47824,
 off by default) and opens http://127.0.0.1:47823/phone with the QR code. The QR link carries an access
 token once and leaves a cookie (SameSite=Lax: QR scanners open the link from their own site); without
@@ -52,9 +70,10 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
 | `src-tauri/src/overlay/` | the panel window: placement over the game, focus, capture exclusion (Win32) |
 | `src-tauri/src/agent/` | agents over ACP: adapter install, supervision, sessions, permissions; `spec.rs` = per-agent settings |
 | `src-tauri/src/chat.rs`, `history.rs` | current chat ↔ agent session, system prompt; chat history in SQLite, frames on disk |
-| `src-tauri/src/games.rs` | game profiles (per exe): name, instructions, sources |
-| `src-tauri/src/capture/`, `shots.rs` | game frames: Windows Graphics Capture, JPEG encoding, storage |
-| `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): `screenshot_game` |
+| `src-tauri/src/games.rs`, `progress.rs` | game profiles (per exe): name, instructions, sources; progress memory |
+| `src-tauri/src/widgets.rs` | widgets per game and the transparent layer window over the game (click-through outside cards) |
+| `src-tauri/src/capture/`, `shots.rs` | game frames: Windows Graphics Capture, JPEG encoding, storage; `look.rs` = zoom crops, change detection |
+| `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): frames, progress memory, widgets |
 | `src-tauri/src/server/` | HTTP + WebSocket servers the UI talks to: local (127.0.0.1) and LAN (token) |
 | `src-tauri/src/lan.rs` | phone access: on/off, token, addresses, QR codes |
 | `src-tauri/src/protocol.rs` | WebSocket protocol; TS types are generated from it |
@@ -91,7 +110,8 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
   `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,
   0 = full; never over 2000 px a side); saved frames stay full size.
   `[lan] port = 47824` — port for phones (a free one if busy).
-- History: `%LOCALAPPDATA%\game-overlai\history.db` (chats, game profiles, panel places) + `shots\` (frames,
+  `[memory] progress = true` — progress memory (the agent's tools for it and the notes in its prompt).
+- History: `%LOCALAPPDATA%\game-overlai\history.db` (chats, game profiles, progress notes, widgets, panel places) + `shots\` (frames,
   deleted with their chat). `lan.json` there: phone access on/off and its token.
 - Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).
 

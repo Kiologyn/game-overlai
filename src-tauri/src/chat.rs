@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 
 use crate::agent::{AgentEvent, PromptBlock, StopReason, Update};
 use crate::history::{StoredChat, now_ms};
-use crate::mcp::SCREENSHOT_TOOL;
+use crate::mcp::IMAGE_TOOLS;
 use crate::protocol::{
     AppendKind, ChatMessage, GameInfo, GameProfile, MessageStatus, Part, PermissionPrompt, Role, ServerMsg, Shot, ToolInfo,
     ToolStatus,
@@ -432,8 +432,9 @@ async fn ensure_session(state: &Arc<AppState>, epoch: u64) -> Result<Session, St
     };
     let cwd = profile_dir(state);
     let profile = game.as_ref().and_then(|g| games::profile(state, &g.exe));
-    let key = profile_key(profile.as_ref());
-    let prompt = system_prompt(game.as_ref(), profile.as_ref());
+    let memory = state.cfg().memory.progress;
+    let key = profile_key(profile.as_ref(), memory);
+    let prompt = system_prompt(game.as_ref(), profile.as_ref(), memory);
     // (id, a new session: its system prompt has the current profile)
     let (id, needs_history, new) = match session {
         Some(id) if live_in == Some(agent.generation()) => (id, false, false),
@@ -455,14 +456,14 @@ async fn ensure_session(state: &Arc<AppState>, epoch: u64) -> Result<Session, St
     // A continued session was told an older profile (chats from before profiles: none at all).
     let outdated = match known_profile {
         Some(known) => known != key,
-        None => key != profile_key(None),
+        None => key != profile_key(None, false),
     };
     let profile_note = (!new && outdated).then(|| {
         info!("chat {chat_id}: the game's profile changed; the agent gets the new one with this question");
         format!(
             "(Note from the overlay app, not written by the user: the game's profile was changed since this \
              conversation started. From now on it replaces anything said about the game earlier:\n{})",
-            game_section(game.as_ref(), profile.as_ref()).trim_end()
+            game_section(game.as_ref(), profile.as_ref(), memory).trim_end()
         )
     });
     let mut chat = state.chat.lock().unwrap();
@@ -542,13 +543,14 @@ fn transcript(messages: &[ChatMessage], budget: usize) -> String {
     lines.join("\n\n")
 }
 
-/// The agent's screenshot tool took a frame: show it on that tool call in the answer.
+/// One of the agent's image tools (screenshot, zoom, watch) made a frame: show it on that tool
+/// call in the answer.
 pub fn attach_tool_shot(state: &AppState, shot: Shot) {
     let mut chat = state.chat.lock().unwrap();
     let Some(active) = chat.active.clone() else { return };
     let Some(message) = chat.message_mut(&active) else { return };
     let waiting = message.parts.iter_mut().rev().find_map(|p| match p {
-        Part::Tool { tool } if tool.title == SCREENSHOT_TOOL && tool.shot.is_none() => Some(tool),
+        Part::Tool { tool } if IMAGE_TOOLS.contains(&tool.title.as_str()) && tool.shot.is_none() => Some(tool),
         _ => None,
     });
     match waiting {
@@ -580,7 +582,7 @@ fn humanize_error(e: &str, login_hint: &str) -> String {
 
 /// Identifies what a session is told about the game's profile (the name, instructions and
 /// sources; not the 📷 default).
-fn profile_key(profile: Option<&GameProfile>) -> u64 {
+fn profile_key(profile: Option<&GameProfile>, memory: bool) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     if let Some(p) = profile {
@@ -590,7 +592,30 @@ fn profile_key(profile: Option<&GameProfile>) -> u64 {
     } else {
         ("", "", "").hash(&mut h);
     }
+    // Progress memory: on or off, and the notes (keys of chats from before it stay the same while off).
+    if memory {
+        "memory".hash(&mut h);
+        for n in profile.map(|p| p.progress.as_slice()).unwrap_or_default() {
+            (&n.id, &n.text).hash(&mut h);
+        }
+    }
     h.finish()
+}
+
+/// The agent changed the game's progress notes from the current chat: its session knows the
+/// change, so the next question needn't repeat the game's section.
+pub fn progress_changed_by_agent(state: &AppState) {
+    let memory = state.cfg().memory.progress;
+    let mut chat = state.chat.lock().unwrap();
+    let Some(game) = chat.game.clone() else { return };
+    if chat.session_profile.is_none() {
+        return;
+    }
+    let key = profile_key(games::profile(state, &game.exe).as_ref(), memory);
+    chat.session_profile = Some(key);
+    if chat.saved {
+        state.history.set_profile_key(&chat.id, key as i64);
+    }
 }
 
 const BASE_PROMPT: &str = "You are an AI assistant inside an overlay on top of a video game. The user is playing right \
@@ -605,14 +630,19 @@ const BASE_PROMPT: &str = "You are an AI assistant inside an overlay on top of a
        \"what is that\", asks about their current situation, UI, map, inventory, an enemy or a puzzle, or seeing \
        it would make the answer more precise. Don't call it for general questions about the game. The first \
        frame after the user opens the overlay shows the moment they opened it (the mouse cursor may point at \
-       the thing); later calls take a fresh one.\n";
+       the thing); later calls take a fresh one. If small text in it matters and you can't read it, look closer \
+       with `zoom_screen`. If the user asks you to wait for something on screen, use `watch_screen`.\n\
+     - Widgets (`widget_create` and the other widget tools) are small cards pinned over the game for the user: \
+       quest steps, a build, a checklist, a countdown. Make one when the user asks to pin or track something, \
+       keep it short, and read `widget_list` before changing one (the user ticks items).\n";
 
-fn system_prompt(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> String {
-    format!("{BASE_PROMPT}{}", game_section(game, profile))
+fn system_prompt(game: Option<&GameInfo>, profile: Option<&GameProfile>, memory: bool) -> String {
+    format!("{BASE_PROMPT}{}", game_section(game, profile, memory))
 }
 
-/// What the agent is told about the game: which one it is and the user's profile of it.
-fn game_section(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> String {
+/// What the agent is told about the game: which one it is, the user's profile of it and (with
+/// progress memory on) what it remembers about the user's progress.
+fn game_section(game: Option<&GameInfo>, profile: Option<&GameProfile>, memory: bool) -> String {
     let mut p = String::new();
     let name = profile.and_then(|p| p.name.as_deref()).filter(|n| !n.is_empty());
     match (game, name) {
@@ -627,6 +657,9 @@ fn game_section(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> Strin
             g.title, g.exe
         )),
         _ => p.push_str("- The game is unknown; ask which game if it matters.\n"),
+    }
+    if memory && game.is_some_and(|g| !g.exe.is_empty()) {
+        p.push_str(&progress_section(profile.map(|p| p.progress.as_slice()).unwrap_or_default()));
     }
     let Some(profile) = profile else { return p };
     let sources: Vec<&str> = profile.sources.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
@@ -645,6 +678,27 @@ fn game_section(game: Option<&GameInfo>, profile: Option<&GameProfile>) -> Strin
             "\nThe user's standing instructions for this game. Follow them in every answer; they take priority \
              over the defaults above:\n<instructions>\n{instructions}\n</instructions>\n"
         ));
+    }
+    p
+}
+
+/// Progress memory: what to save, and what is saved so far.
+fn progress_section(notes: &[crate::protocol::ProgressNote]) -> String {
+    let mut p = String::from(
+        "\nProgress memory: save lasting facts about the user's progress in this game with `progress_add`: the \
+         chapter, act or area reached, their character, class or build, bosses beaten and quests done, important \
+         choices, goals they mention. One short self-contained fact per note. When a fact changes, fix its note with \
+         `progress_update` (or `progress_remove`) instead of adding a new one. Don't save temporary details, general \
+         game facts or anything the user asks you not to remember, and don't announce saving. Use what you know \
+         below without asking again, but the user's newer words win.\n",
+    );
+    if notes.is_empty() {
+        p.push_str("Nothing is saved for this game yet.\n");
+    } else {
+        p.push_str("Saved so far (id: fact):\n");
+        for n in notes {
+            p.push_str(&format!("- {}: {}\n", n.id, n.text.replace('\n', " ")));
+        }
     }
     p
 }
@@ -777,7 +831,7 @@ fn handle_event(state: &Arc<AppState>, event: AgentEvent) {
             // A frame the screenshot tool took before its tool call showed up.
             if let Some(shot) = pending_shot {
                 match &mut out {
-                    ServerMsg::ChatTool { tool, .. } if tool.title == SCREENSHOT_TOOL && tool.shot.is_none() => {
+                    ServerMsg::ChatTool { tool, .. } if IMAGE_TOOLS.contains(&tool.title.as_str()) && tool.shot.is_none() => {
                         tool.shot = Some(shot);
                         message.upsert_tool(tool.clone());
                     }
@@ -828,7 +882,7 @@ mod tests {
     #[test]
     fn system_prompt_carries_the_game_profile() {
         let game = GameInfo { title: "UnityWndClass".into(), exe: "hollow.exe".into() };
-        let plain = system_prompt(Some(&game), None);
+        let plain = system_prompt(Some(&game), None, false);
         assert!(plain.contains("\"UnityWndClass\" (process hollow.exe)") && plain.contains("infer the game"));
         assert!(!plain.contains("<instructions>") && !plain.contains("Preferred sources"));
 
@@ -838,18 +892,45 @@ mod tests {
             name: Some("Hollow Knight".into()),
             instructions: "  без спойлеров  ".into(),
             sources: "hollowknight.wiki\n\n  fextralife.com ".into(),
+            progress: vec![],
         };
-        let p = system_prompt(Some(&game), Some(&profile));
+        let p = system_prompt(Some(&game), Some(&profile), false);
         assert!(p.contains("The game is Hollow Knight (window \"UnityWndClass\""), "{p}");
         assert!(!p.contains("infer the game"));
         assert!(p.contains("- hollowknight.wiki\n- fextralife.com\n"), "{p}");
         assert!(p.contains("<instructions>\nбез спойлеров\n</instructions>"), "{p}");
 
-        assert_ne!(profile_key(Some(&profile)), profile_key(None));
+        assert_ne!(profile_key(Some(&profile), false), profile_key(None, false));
         // An empty profile is the same as none.
         profile = GameProfile { name: None, instructions: String::new(), sources: " \n".into(), ..profile };
-        assert_eq!(system_prompt(Some(&game), Some(&profile)), plain);
-        assert_eq!(profile_key(Some(&profile)), profile_key(None));
+        assert_eq!(system_prompt(Some(&game), Some(&profile), false), plain);
+        assert_eq!(profile_key(Some(&profile), false), profile_key(None, false));
+    }
+
+    #[test]
+    fn progress_memory_in_the_prompt() {
+        let game = GameInfo { title: "ELDEN RING".into(), exe: "eldenring.exe".into() };
+        let note = |id: &str, text: &str| crate::protocol::ProgressNote { id: id.into(), text: text.into(), updated_at: 0 };
+        let mut profile = GameProfile {
+            exe: "eldenring.exe".into(),
+            title: "ELDEN RING".into(),
+            name: None,
+            instructions: String::new(),
+            sources: String::new(),
+            progress: vec![note("a1", "Chapter 3"), note("b2", "Plays a mage")],
+        };
+        let off = system_prompt(Some(&game), Some(&profile), false);
+        assert!(!off.contains("progress_add") && !off.contains("Chapter 3"), "memory off: nothing about it");
+        let on = system_prompt(Some(&game), Some(&profile), true);
+        assert!(on.contains("progress_add") && on.contains("- a1: Chapter 3\n- b2: Plays a mage\n"), "{on}");
+        assert!(system_prompt(Some(&game), None, true).contains("Nothing is saved for this game yet."));
+        assert!(!system_prompt(None, None, true).contains("progress_add"), "no game: nothing to remember it for");
+
+        let key = profile_key(Some(&profile), true);
+        assert_ne!(key, profile_key(Some(&profile), false));
+        profile.progress[0].text = "Chapter 4".into();
+        assert_ne!(key, profile_key(Some(&profile), true), "a changed note changes the key");
+        assert_eq!(profile_key(Some(&profile), false), profile_key(None, false), "notes don't count while off");
     }
 
     #[test]

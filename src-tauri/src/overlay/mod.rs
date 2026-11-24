@@ -96,6 +96,7 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
     // Focus went to another app: hide the panel (checked again after a moment).
     let on_focus = app.clone();
     let watching = win32::watch_foreground(move |fg| {
+        crate::widgets::refresh(&on_focus); // the widgets of the game in the foreground
         if fg.is_invalid() || win32::is_own(fg) || !self::state(&on_focus).overlay.lock().unwrap().visible {
             return;
         }
@@ -314,6 +315,14 @@ fn hide_panel(app: &AppHandle, give_focus_back: bool) {
         let _ = win32::set_foreground(game);
     }
     debug!("panel hidden");
+}
+
+/// The widget layer came up (topmost too): the panel, if shown, stays above it.
+pub fn keep_panel_on_top(app: &AppHandle) {
+    let visible = state(app).overlay.lock().unwrap().visible;
+    if visible && let Some(w) = panel(app) {
+        let _ = w.set_always_on_top(true);
+    }
 }
 
 /// The UI switched compact <-> expanded (e.g. first message sent from the quick field).

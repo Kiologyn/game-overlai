@@ -2,7 +2,7 @@
 //! when a question needs the screen. Encoded images are kept with their chat in the
 //! history (`shots\<chat>\<shot>.jpg`) and served to the UI at `/api/shots/{id}`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -57,6 +57,31 @@ pub async fn for_agent(state: &AppState) -> Result<AgentFrame, String> {
     }
 }
 
+/// A fresh frame of the game (no hotkey frame): `zoom_screen` with `fresh`, `watch_screen`.
+pub async fn grab_now(state: &AppState) -> Result<Frame, String> {
+    let hwnd = state.overlay.lock().unwrap().game_hwnd;
+    grab_game(state, hwnd).await
+}
+
+/// The last frame the agent was shown whole (full resolution) and the size it saw it at:
+/// `zoom_screen` regions are in those coordinates.
+#[derive(Clone)]
+pub struct Seen {
+    pub frame: Arc<Frame>,
+    pub width: u32,
+    pub height: u32,
+}
+
+static SEEN: Mutex<Option<Seen>> = Mutex::new(None);
+
+pub fn seen() -> Option<Seen> {
+    SEEN.lock().unwrap().clone()
+}
+
+pub fn set_seen(frame: Arc<Frame>, width: u32, height: u32) {
+    *SEEN.lock().unwrap() = Some(Seen { frame, width, height });
+}
+
 async fn grab_game(state: &AppState, hwnd: isize) -> Result<Frame, String> {
     if hwnd == 0 {
         return Err(tr!("err_no_game"));
@@ -77,9 +102,20 @@ pub struct Stored {
 /// Saves the frame with the chat `chat_id` at full resolution and encodes the copy for the
 /// agent, scaled down to `[capture] agent_max_height`. Both run in parallel off the async threads.
 pub async fn store(state: &AppState, chat_id: &str, frame: Arc<Frame>) -> Result<Stored, String> {
+    let (width, height) = capture::agent_size(frame.width, frame.height, state.config.read().unwrap().capture.agent_max_height);
+    store_as(state, chat_id, frame, width, height).await
+}
+
+/// `store`, with the agent's copy at `sent_width`×`sent_height` (scaled either way).
+pub async fn store_as(
+    state: &AppState,
+    chat_id: &str,
+    frame: Arc<Frame>,
+    sent_width: u32,
+    sent_height: u32,
+) -> Result<Stored, String> {
     let started = std::time::Instant::now();
     let shot = Shot { id: uuid::Uuid::new_v4().simple().to_string(), width: frame.width, height: frame.height };
-    let (sent_width, sent_height) = capture::agent_size(frame.width, frame.height, state.config.read().unwrap().capture.agent_max_height);
 
     let for_agent = tauri::async_runtime::spawn_blocking({
         let frame = frame.clone();

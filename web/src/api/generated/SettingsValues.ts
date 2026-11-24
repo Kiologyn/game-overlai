@@ -35,4 +35,8 @@ panelCapturable: boolean,
 /**
  * Height of frames sent to the agent (0 = full).
  */
-agentMaxHeight: number, lanPort: number, notifications: boolean, };
+agentMaxHeight: number, lanPort: number, notifications: boolean, 
+/**
+ * The agent remembers the user's progress per game (`[memory] progress`).
+ */
+progressMemory: boolean, };

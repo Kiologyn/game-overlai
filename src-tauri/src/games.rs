@@ -1,7 +1,8 @@
 //! Game profiles: per executable, what the user tells the agent about the game (its name,
-//! standing instructions, sites to search first) and the 📷 default of the panel. A game gets
-//! a profile row with its first chat; the browser page of a game edits it. Every chat of the
-//! game gets the profile in its system prompt (`chat::system_prompt`), from its next question.
+//! standing instructions, sites to search first) and what the agent remembers about the user's
+//! progress (`progress.rs`). A game gets a profile row with its first chat (or note, or widget);
+//! the browser page of a game edits it. Every chat of the game gets the profile in its system
+//! prompt (`chat::system_prompt`), from its next question.
 
 use tracing::info;
 
@@ -37,15 +38,7 @@ pub fn update(state: &AppState, exe: &str, mut edit: ProfileEdit) {
     edit.name = edit.name.map(|n| cut(&n, MAX_NAME));
     edit.instructions = cut(&edit.instructions, MAX_INSTRUCTIONS);
     edit.sources = cut(&edit.sources, MAX_SOURCES);
-    // A game without chats yet (opened from the overlay): its window title, if we know it.
-    let over = state.overlay.lock().unwrap().game.clone();
-    let in_chat = state.chat.lock().unwrap().game.clone();
-    let title = [over, in_chat]
-        .into_iter()
-        .flatten()
-        .find(|g| g.exe.eq_ignore_ascii_case(exe))
-        .map(|g| g.title)
-        .unwrap_or_default();
+    let title = known_title(state, exe);
     if let Some(game) = state.history.update_game(exe, &title, &edit) {
         info!(
             "game profile {exe}: name={:?}, {} chars of instructions, {} sources",
@@ -57,7 +50,20 @@ pub fn update(state: &AppState, exe: &str, mut edit: ProfileEdit) {
     }
 }
 
-fn cut(s: &str, max: usize) -> String {
+/// The window title of a game without chats yet (opened from the overlay), if we know it: its
+/// row is created with it.
+pub fn known_title(state: &AppState, exe: &str) -> String {
+    let over = state.overlay.lock().unwrap().game.clone();
+    let in_chat = state.chat.lock().unwrap().game.clone();
+    [over, in_chat]
+        .into_iter()
+        .flatten()
+        .find(|g| g.exe.eq_ignore_ascii_case(exe))
+        .map(|g| g.title)
+        .unwrap_or_default()
+}
+
+pub fn cut(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
         Some((i, _)) => s[..i].to_string(),
         None => s.to_string(),

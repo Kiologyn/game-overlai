@@ -139,6 +139,11 @@ export function SettingsPage({ conn }: { conn: Connection }) {
             ))}
           </div>
           {chosen && <p className="field-hint">{chosen.loginHint}</p>}
+          <label className="settings-check">
+            <input type="checkbox" checked={form.progressMemory} onChange={(e) => set("progressMemory", e.target.checked)} />
+            {t("progress_memory")}
+          </label>
+          <p className="field-hint">{t("progress_memory_hint")}</p>
         </section>
 
         <section>

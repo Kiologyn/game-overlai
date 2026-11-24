@@ -5,15 +5,20 @@ import { App } from "./app/App";
 import { PhonePage } from "./app/PhonePage";
 import { SettingsPage } from "./app/SettingsPage";
 import { Panel } from "./panel/Panel";
+import { WidgetLayer } from "./widgets/WidgetLayer";
 import "./styles.css";
 
 const isPanel = location.pathname.startsWith("/panel");
-document.documentElement.dataset.surface = isPanel ? "overlay" : "page";
+const isWidgets = location.pathname.startsWith("/widgets");
+// Both overlay windows are transparent: only the panel or the widgets are drawn.
+document.documentElement.dataset.surface = isPanel || isWidgets ? "overlay" : "page";
 
 const conn = connect(isPanel ? "overlay" : "browser");
 
 const page = isPanel ? (
   <Panel conn={conn} />
+) : isWidgets ? (
+  <WidgetLayer conn={conn} />
 ) : location.pathname.startsWith("/phone") ? (
   <PhonePage conn={conn} />
 ) : location.pathname.startsWith("/settings") ? (

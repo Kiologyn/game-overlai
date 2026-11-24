@@ -56,14 +56,15 @@ pub fn by_id(id: &str) -> &'static AgentSpec {
 /// "Lean" Claude Code session (measured in phase 0: ~3K instead of ~41K tokens per question,
 /// first token ~1.3 s instead of ~2.8 s): don't load the user's global settings, plugins,
 /// skills and MCP servers; keep only web tools. Our MCP server is passed separately, and its
-/// screenshot tool runs without a permission prompt (it only reads the game window).
+/// tools run without a permission prompt (they read the game window, keep progress notes and
+/// widgets of the app; nothing outside it).
 fn claude_meta() -> Map<String, Value> {
     let v = json!({
         "claudeCode": { "options": {
             "settingSources": [],
             "strictMcpConfig": true,
             "tools": ["WebSearch", "WebFetch"],
-            "allowedTools": [format!("mcp__{}__{}", crate::mcp::SERVER_NAME, crate::mcp::SCREENSHOT_TOOL)]
+            "allowedTools": [format!("mcp__{}", crate::mcp::SERVER_NAME)]
         }}
     });
     v.as_object().cloned().unwrap_or_default()

@@ -91,6 +91,75 @@ pub struct GameProfile {
     pub instructions: String,
     /// Sites the agent should search first, one per line.
     pub sources: String,
+    /// What the agent remembers about the user's progress (oldest first).
+    pub progress: Vec<ProgressNote>,
+}
+
+/// A lasting fact about the user's progress in a game (chapter, build, finished quests...),
+/// saved by the agent with its MCP tools or by the user on the game's page. Every chat of the
+/// game gets them in its system prompt while progress memory is on (settings).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProgressNote {
+    pub id: String,
+    pub text: String,
+    /// Unix milliseconds.
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+// ------------------------------------------------------------------ widgets
+
+/// A card pinned over a game's window (each game has its own). The agent makes and changes it
+/// with MCP tools; the user moves it, ticks its checklist, makes it see-through or folds it.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct Widget {
+    pub id: String,
+    /// The game (process name) it belongs to.
+    pub exe: String,
+    pub title: String,
+    /// Markdown, short.
+    pub body: String,
+    /// A checklist the user ticks (its state is the widget's progress).
+    pub items: Vec<WidgetItem>,
+    /// Countdown to this moment (unix ms).
+    #[ts(type = "number | null")]
+    pub timer_ends_at: Option<i64>,
+    /// JSON the agent keeps for itself (counts, stages...): not shown, returned by widget_list.
+    pub data: String,
+    /// Top-left corner, as a fraction (0..1) of the game window.
+    pub x: f64,
+    pub y: f64,
+    /// Logical px.
+    pub width: f64,
+    /// 50% opacity (the button in the corner).
+    pub translucent: bool,
+    /// Only the title bar.
+    pub collapsed: bool,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct WidgetItem {
+    pub id: String,
+    pub text: String,
+    pub done: bool,
+}
+
+/// Where a widget is on the widget layer (CSS px of the layer), for click-through outside widgets.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WidgetRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 // ------------------------------------------------------------------ chat
@@ -377,6 +446,8 @@ pub struct SettingsValues {
     pub agent_max_height: u32,
     pub lan_port: u16,
     pub notifications: bool,
+    /// The agent remembers the user's progress per game (`[memory] progress`).
+    pub progress_memory: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -495,6 +566,41 @@ pub enum ClientMsg {
     /// Open an http(s) link in the default browser (links must not navigate the overlay).
     #[serde(rename = "ui.openUrl")]
     UiOpenUrl { url: String },
+    /// The user ticked or unticked a widget's checklist item.
+    #[serde(rename = "widget.toggleItem", rename_all = "camelCase")]
+    WidgetToggleItem { id: String, item_id: String },
+    /// The user moved, resized, folded or made a widget see-through (only the given fields change).
+    #[serde(rename = "widget.set")]
+    WidgetSet {
+        id: String,
+        #[serde(default)]
+        #[ts(optional)]
+        x: Option<f64>,
+        #[serde(default)]
+        #[ts(optional)]
+        y: Option<f64>,
+        #[serde(default)]
+        #[ts(optional)]
+        width: Option<f64>,
+        #[serde(default)]
+        #[ts(optional)]
+        translucent: Option<bool>,
+        #[serde(default)]
+        #[ts(optional)]
+        collapsed: Option<bool>,
+    },
+    #[serde(rename = "widget.delete")]
+    WidgetDelete { id: String },
+    /// The widget layer page: where its widgets are, so clicks elsewhere go to the game.
+    #[serde(rename = "widgets.rects")]
+    WidgetRects { rects: Vec<WidgetRect> },
+    /// The game page: the user edits what the agent remembers about the game.
+    #[serde(rename = "progress.add")]
+    ProgressAdd { exe: String, text: String },
+    #[serde(rename = "progress.edit")]
+    ProgressEdit { id: String, text: String },
+    #[serde(rename = "progress.delete")]
+    ProgressDelete { id: String },
 }
 
 /// core -> UI.
@@ -550,6 +656,12 @@ pub enum ServerMsg {
     /// The agent's model / effort choices with their current values (empty: it offers none).
     #[serde(rename = "agent.options")]
     AgentOptions { options: Vec<AgentOption> },
+    /// Every game's widgets: on connect and after any change.
+    #[serde(rename = "widgets")]
+    Widgets { widgets: Vec<Widget> },
+    /// Which game's widgets the widget layer shows now (None: hidden).
+    #[serde(rename = "widgets.shown")]
+    WidgetsShown { exe: Option<String> },
     /// The overlay panel was shown by a hotkey/tray (overlay only).
     #[serde(rename = "overlay.show")]
     OverlayShow { mode: PanelMode, game: Option<GameInfo> },

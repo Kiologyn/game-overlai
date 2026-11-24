@@ -179,44 +179,81 @@ pub fn set_foreground(h: HWND) -> bool {
     unsafe { SetForegroundWindow(h).as_bool() }
 }
 
-/// The panel window, and whether the user lets it into screen captures (settings).
+/// The panel window, the widget layer, and whether the user lets them into screen captures
+/// (settings).
 static PANEL: AtomicIsize = AtomicIsize::new(0);
+static LAYER: AtomicIsize = AtomicIsize::new(0);
 static CAPTURABLE: AtomicBool = AtomicBool::new(false);
 
-/// Shows or hides the panel in screenshots, recordings and streams (OBS, Discord, Win+Shift+S...).
+fn affinity(capturable: bool) -> windows::Win32::UI::WindowsAndMessaging::WINDOW_DISPLAY_AFFINITY {
+    if capturable { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE }
+}
+
+/// Shows or hides the panel (and the widget layer) in screenshots, recordings and streams
+/// (OBS, Discord, Win+Shift+S...).
 pub fn set_capturable(h: HWND, capturable: bool) -> bool {
     PANEL.store(raw(h), Ordering::SeqCst);
     CAPTURABLE.store(capturable, Ordering::SeqCst);
-    let affinity = if capturable { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
-    unsafe { SetWindowDisplayAffinity(h, affinity).is_ok() }
+    let layer = hwnd(LAYER.load(Ordering::SeqCst));
+    if !layer.is_invalid() {
+        let _ = unsafe { SetWindowDisplayAffinity(layer, affinity(capturable)) };
+    }
+    unsafe { SetWindowDisplayAffinity(h, affinity(capturable)).is_ok() }
 }
 
-/// Keeps the panel out of capture while it lives, even if the user lets it in: our own
-/// captures of the whole monitor (frames for the agent) must show the game only.
-pub struct OutOfCapture(Option<HWND>);
+/// The widget layer follows the panel's capture setting.
+pub fn register_layer(h: HWND) {
+    LAYER.store(raw(h), Ordering::SeqCst);
+    if let Err(e) = unsafe { SetWindowDisplayAffinity(h, affinity(CAPTURABLE.load(Ordering::SeqCst))) } {
+        tracing::warn!("widget layer capture setting: {e}");
+    }
+}
+
+/// Keeps the panel and the widget layer out of capture while it lives, even if the user lets
+/// them in: our own captures of the whole monitor (frames for the agent) must show the game only.
+pub struct OutOfCapture(Vec<HWND>);
 
 pub fn out_of_capture() -> OutOfCapture {
-    let h = hwnd(PANEL.load(Ordering::SeqCst));
-    if !CAPTURABLE.load(Ordering::SeqCst) || h.is_invalid() {
-        return OutOfCapture(None); // already out
+    if !CAPTURABLE.load(Ordering::SeqCst) {
+        return OutOfCapture(Vec::new()); // already out
     }
-    match unsafe { SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE) } {
-        Ok(()) => OutOfCapture(Some(h)),
-        Err(e) => {
-            tracing::warn!("could not hide the panel from a monitor capture: {e}");
-            OutOfCapture(None)
-        }
-    }
+    let windows = [&PANEL, &LAYER].map(|w| hwnd(w.load(Ordering::SeqCst)));
+    OutOfCapture(
+        windows
+            .into_iter()
+            .filter(|h| !h.is_invalid())
+            .filter(|h| match unsafe { SetWindowDisplayAffinity(*h, WDA_EXCLUDEFROMCAPTURE) } {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::warn!("could not hide our window from a monitor capture: {e}");
+                    false
+                }
+            })
+            .collect(),
+    )
 }
 
 impl Drop for OutOfCapture {
     fn drop(&mut self) {
-        if let Some(h) = self.0
-            && CAPTURABLE.load(Ordering::SeqCst)
-        {
-            let _ = unsafe { SetWindowDisplayAffinity(h, WDA_NONE) };
+        if CAPTURABLE.load(Ordering::SeqCst) {
+            for h in &self.0 {
+                let _ = unsafe { SetWindowDisplayAffinity(*h, WDA_NONE) };
+            }
         }
     }
+}
+
+/// The cursor in screen pixels.
+pub fn cursor_pos() -> (i32, i32) {
+    let mut p = POINT::default();
+    let _ = unsafe { GetCursorPos(&mut p) };
+    (p.x, p.y)
+}
+
+/// The left mouse button is held (a drag goes on).
+pub fn left_button_down() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+    unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000 != 0 }
 }
 
 /// Screen area to place the panel in, and its DPI scale.

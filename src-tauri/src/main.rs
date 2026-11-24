@@ -17,12 +17,14 @@ mod logging;
 mod mcp;
 mod overlay;
 mod paths;
+mod progress;
 mod protocol;
 mod proxy;
 mod server;
 mod shots;
 mod state;
 mod tray;
+mod widgets;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -100,6 +102,9 @@ fn main() {
             let _ = state.app.set(handle.clone());
             tauri::async_runtime::spawn(server::run(listener, handle.clone(), state.clone()));
             overlay::create(&handle, &state)?;
+            if let Err(e) = widgets::create_layer(&handle, &state) {
+                tracing::warn!("widget layer: {e}"); // the app works without widgets
+            }
             *state.failed_hotkeys.lock().unwrap() = hotkeys::register(&handle);
             tray::build(app)?;
             lan::start_if_enabled(&state);

@@ -22,9 +22,24 @@ pub struct Config {
     pub capture: CaptureConfig,
     pub lan: LanConfig,
     pub notifications: NotificationsConfig,
+    pub memory: MemoryConfig,
     /// The user's model / effort choices per agent id: option id -> value, e.g.
     /// `[agent_options.claude] model = "sonnet"`, `effort = "high"`. Last: TOML tables follow values.
     pub agent_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    /// The agent saves lasting facts about the user's progress per game and gets them in every
+    /// chat of that game.
+    pub progress: bool,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self { progress: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +142,7 @@ impl Default for Config {
             capture: CaptureConfig::default(),
             lan: LanConfig::default(),
             notifications: NotificationsConfig::default(),
+            memory: MemoryConfig::default(),
             agent_options: Default::default(),
         }
     }
@@ -234,6 +250,7 @@ mod tests {
         assert_eq!(partial.lan.port, 47824);
         assert_eq!(partial.agent, "claude");
         assert!(partial.notifications.enabled);
+        assert!(partial.memory.progress, "progress memory is on by default");
         assert!(!partial.network.requires_proxy("claude"), "no proxy requirement by default");
         let strict: Config = toml::from_str("[network]\nrequire_proxy_for = [\"Claude\"]\n").unwrap();
         assert!(strict.network.requires_proxy("claude") && !strict.network.requires_proxy("codex"));

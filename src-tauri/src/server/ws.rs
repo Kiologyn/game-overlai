@@ -10,7 +10,7 @@ use super::Ctx;
 use crate::protocol::{ClientKind, ClientMsg, ServerMsg};
 use crate::state::Target;
 use crate::history::ProfileEdit;
-use crate::{chat, games, lan, overlay, settings};
+use crate::{chat, games, lan, overlay, progress, settings, widgets};
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -42,10 +42,12 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         chat::permissions(&ctx.state),
         ServerMsg::AgentStatus { status: ctx.state.agent_status.lock().unwrap().clone() },
         ServerMsg::AgentOptions { options: ctx.state.agent_options.lock().unwrap().clone() },
+        widgets::snapshot(&ctx.state),
     ];
     if !ctx.lan {
         initial.push(lan::status(&ctx.state));
         initial.push(settings::snapshot(&ctx.state));
+        initial.push(widgets::shown_msg());
     }
     if let Some(usage) = ctx.state.usage.lock().unwrap().clone() {
         initial.push(ServerMsg::AgentUsage { usage });
@@ -150,6 +152,22 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             games::update(&ctx.state, &exe, ProfileEdit { name, instructions, sources })
         }
         ClientMsg::PermissionRespond { id, option_id } => chat::respond_permission(&ctx.state, &id, option_id),
+        ClientMsg::WidgetToggleItem { id, item_id } => widgets::toggle_item(&ctx.state, &id, &item_id),
+        ClientMsg::WidgetSet { id, x, y, width, translucent, collapsed } => {
+            widgets::set_view(&ctx.state, &id, x, y, width, translucent, collapsed)
+        }
+        ClientMsg::WidgetDelete { id } => {
+            let _ = widgets::delete(&ctx.state, &id);
+        }
+        ClientMsg::ProgressAdd { exe, text } => {
+            let _ = progress::add(&ctx.state, &exe, &text);
+        }
+        ClientMsg::ProgressEdit { id, text } => {
+            let _ = progress::edit(&ctx.state, &id, &text);
+        }
+        ClientMsg::ProgressDelete { id } => {
+            let _ = progress::delete(&ctx.state, &id);
+        }
         // This PC's UI only: devices on the network can't change access or open things on the PC.
         ClientMsg::LanSet { .. }
         | ClientMsg::LanResetToken
@@ -161,6 +179,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         | ClientMsg::SettingsCapturing { .. }
         | ClientMsg::SettingsResetPanelPlaces
         | ClientMsg::AppRestart
+        | ClientMsg::WidgetRects { .. }
             if ctx.lan =>
         {
             warn!("LAN device sent a local-only message: ignored");
@@ -179,6 +198,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
             info!("panel places forgotten");
         }
         ClientMsg::AppRestart => settings::restart(&ctx.state),
+        ClientMsg::WidgetRects { rects } => widgets::set_rects(rects),
         ClientMsg::UiOpenUrl { url } => {
             if url.starts_with("https://") || url.starts_with("http://") {
                 use tauri_plugin_opener::OpenerExt;

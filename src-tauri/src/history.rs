@@ -14,10 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, params};
 use tracing::{info, warn};
 
-use crate::protocol::{ChatMessage, ChatSummary, GameInfo, GameProfile, Shot};
+use crate::protocol::{ChatMessage, ChatSummary, GameInfo, GameProfile, ProgressNote, Shot, Widget};
 
 /// Bumped with every schema change; `migrate` brings older files up to date.
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE games (
@@ -84,6 +84,26 @@ ALTER TABLE chats ADD COLUMN profile_key INTEGER;
 /// Panel zoom per game (NULL = rows saved before zoom existed: 100%).
 const SCHEMA_V5: &str = "
 ALTER TABLE panel_layouts ADD COLUMN zoom REAL;
+";
+
+/// What the agent remembers about the user's progress per game, and the widgets pinned over
+/// each game (a widget is kept whole as JSON: its fields change with the app).
+const SCHEMA_V6: &str = "
+CREATE TABLE progress_notes (
+    id          TEXT PRIMARY KEY,
+    game_exe    TEXT NOT NULL COLLATE NOCASE,
+    text        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX progress_by_game ON progress_notes(game_exe, created_at);
+CREATE TABLE widgets (
+    id          TEXT PRIMARY KEY,
+    game_exe    TEXT NOT NULL COLLATE NOCASE,
+    body        TEXT NOT NULL,     -- protocol::Widget as JSON
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX widgets_by_game ON widgets(game_exe, created_at);
 ";
 
 /// Where the user put the overlay panel over a game, relative to the game window (so it stays
@@ -355,19 +375,113 @@ pub struct ProfileEdit {
 }
 
 impl History {
-    /// All games with chats or a profile, most recently played first.
+    /// All games with chats, a profile, progress notes or widgets, most recently played first.
     pub fn games(&self) -> Vec<GameProfile> {
-        self.read("list games", |db| {
+        let mut games: Vec<GameProfile> = self.read("list games", |db| {
             let mut q = db.prepare(&format!("{GAME} ORDER BY last_seen DESC"))?;
             q.query_map([], game_row)?.collect()
-        })
+        });
+        let mut notes: Vec<(String, ProgressNote)> = self.read("list progress", |db| {
+            let mut q = db.prepare("SELECT game_exe, id, text, updated_at FROM progress_notes ORDER BY created_at")?;
+            q.query_map([], |r| Ok((r.get::<_, String>(0)?.to_lowercase(), note_row(r, 1)?)))?.collect()
+        });
+        for game in &mut games {
+            let exe = game.exe.to_lowercase();
+            game.progress = notes.extract_if(.., |(e, _)| *e == exe).map(|(_, n)| n).collect();
+        }
+        games
     }
 
     pub fn game(&self, exe: &str) -> Option<GameProfile> {
         if exe.is_empty() {
             return None;
         }
-        self.read("game profile", |db| db.query_row(&format!("{GAME} WHERE exe = ?1"), [exe], game_row).optional())
+        let mut game = self.read("game profile", |db| db.query_row(&format!("{GAME} WHERE exe = ?1"), [exe], game_row).optional())?;
+        game.progress = self.progress(exe);
+        Some(game)
+    }
+
+    /// What the agent remembers about the user's progress in a game, oldest first.
+    pub fn progress(&self, exe: &str) -> Vec<ProgressNote> {
+        self.read("progress", |db| {
+            let mut q = db.prepare(
+                "SELECT id, text, updated_at FROM progress_notes WHERE game_exe = ?1 ORDER BY created_at",
+            )?;
+            q.query_map([exe], |r| note_row(r, 0))?.collect()
+        })
+    }
+
+    /// Adds a progress note (a game not seen yet is added with `title`).
+    pub fn add_progress(&self, exe: &str, title: &str, text: &str) -> Option<ProgressNote> {
+        if exe.is_empty() {
+            return None;
+        }
+        let note = ProgressNote { id: short_id(), text: text.to_string(), updated_at: now_ms() };
+        let mut ok = false;
+        self.write("add progress", |db| {
+            ensure_game(db, exe, title)?;
+            db.execute(
+                "INSERT INTO progress_notes (id, game_exe, text, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![note.id, exe, note.text, note.updated_at],
+            )?;
+            ok = true;
+            Ok(())
+        });
+        ok.then_some(note)
+    }
+
+    /// Changes a note's text; returns its game.
+    pub fn edit_progress(&self, id: &str, text: &str) -> Option<String> {
+        let exe = self.progress_game(id)?;
+        self.write("edit progress", |db| {
+            db.execute("UPDATE progress_notes SET text = ?2, updated_at = ?3 WHERE id = ?1", params![id, text, now_ms()])
+                .map(drop)
+        });
+        Some(exe)
+    }
+
+    /// Removes a note; returns its game.
+    pub fn delete_progress(&self, id: &str) -> Option<String> {
+        let exe = self.progress_game(id)?;
+        self.write("delete progress", |db| db.execute("DELETE FROM progress_notes WHERE id = ?1", [id]).map(drop));
+        Some(exe)
+    }
+
+    fn progress_game(&self, id: &str) -> Option<String> {
+        self.read("progress note", |db| {
+            db.query_row("SELECT game_exe FROM progress_notes WHERE id = ?1", [id], |r| r.get(0)).optional()
+        })
+    }
+
+    /// Every game's widgets, oldest first.
+    pub fn widgets(&self) -> Vec<Widget> {
+        let rows: Vec<String> = self.read("list widgets", |db| {
+            let mut q = db.prepare("SELECT body FROM widgets ORDER BY created_at")?;
+            q.query_map([], |r| r.get(0))?.collect()
+        });
+        rows.iter()
+            .filter_map(|body| {
+                serde_json::from_str(body).map_err(|e| warn!("history: a widget doesn't parse: {e}")).ok()
+            })
+            .collect()
+    }
+
+    /// Adds or replaces a widget (a game not seen yet is added with `title`).
+    pub fn save_widget(&self, widget: &Widget, title: &str) {
+        let Ok(body) = serde_json::to_string(widget) else { return };
+        self.write("save widget", |db| {
+            ensure_game(db, &widget.exe, title)?;
+            db.execute(
+                "INSERT INTO widgets (id, game_exe, body, created_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (id) DO UPDATE SET body = excluded.body",
+                params![widget.id, widget.exe, body, now_ms()],
+            )
+            .map(drop)
+        });
+    }
+
+    pub fn delete_widget(&self, id: &str) {
+        self.write("delete widget", |db| db.execute("DELETE FROM widgets WHERE id = ?1", [id]).map(drop));
     }
 
     /// Saves the profile (a game not seen yet is added with `title`). Returns the stored profile.
@@ -436,7 +550,26 @@ fn game_row(r: &rusqlite::Row) -> rusqlite::Result<GameProfile> {
         name: r.get(2)?,
         instructions: r.get(3)?,
         sources: r.get(4)?,
+        progress: Vec::new(),
     })
+}
+
+fn note_row(r: &rusqlite::Row, at: usize) -> rusqlite::Result<ProgressNote> {
+    Ok(ProgressNote { id: r.get(at)?, text: r.get(at + 1)?, updated_at: r.get(at + 2)? })
+}
+
+/// A game row for a game that has none yet (it got notes or widgets before any chat).
+fn ensure_game(db: &Connection, exe: &str, title: &str) -> rusqlite::Result<()> {
+    db.execute(
+        "INSERT INTO games (exe, title, last_seen) VALUES (?1, ?2, ?3) ON CONFLICT (exe) DO NOTHING",
+        params![exe, title, now_ms()],
+    )
+    .map(drop)
+}
+
+/// Short ids: the agent quotes them back (progress notes, widgets, checklist items).
+pub fn short_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..8].to_string()
 }
 
 const SUMMARY: &str = "SELECT c.id, COALESCE(c.title, c.preview), c.game_exe, COALESCE(g.title, c.game_title), c.updated_at
@@ -497,6 +630,9 @@ fn migrate(db: &Connection) -> rusqlite::Result<()> {
     }
     if version < 5 {
         db.execute_batch(&format!("BEGIN; {SCHEMA_V5} PRAGMA user_version = 5; COMMIT;"))?;
+    }
+    if version < 6 {
+        db.execute_batch(&format!("BEGIN; {SCHEMA_V6} PRAGMA user_version = 6; COMMIT;"))?;
     }
     Ok(())
 }
@@ -634,4 +770,31 @@ mod tests {
         assert_eq!(History::open(&dir).list().len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn progress_notes_and_widgets() {
+        let h = History::in_memory(std::env::temp_dir().join("overlai-unused-shots"));
+        // A game with no chats yet gets a row with its first note.
+        let a = h.add_progress("eldenring.exe", "ELDEN RING", "Chapter 3, playing a mage").unwrap();
+        let b = h.add_progress("EldenRing.exe", "", "Margit defeated").unwrap();
+        assert_eq!(h.game("eldenring.exe").unwrap().title, "ELDEN RING");
+        let texts = |exe: &str| h.progress(exe).into_iter().map(|n| n.text).collect::<Vec<_>>();
+        assert_eq!(texts("ELDENRING.EXE"), ["Chapter 3, playing a mage", "Margit defeated"]);
+        assert_eq!(h.edit_progress(&a.id, "Chapter 4").as_deref(), Some("eldenring.exe"));
+        assert_eq!(h.delete_progress(&b.id).as_deref(), Some("EldenRing.exe"));
+        assert_eq!(h.delete_progress("nope"), None);
+        let games = h.games();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].progress.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), ["Chapter 4"]);
+
+        let mut w = Widget { id: short_id(), exe: "cs2.exe".into(), title: "Smokes".into(), width: 260.0, ..Default::default() };
+        h.save_widget(&w, "Counter-Strike 2");
+        w.title = "Smokes on Mirage".into();
+        h.save_widget(&w, "");
+        assert_eq!(h.widgets(), [w.clone()]);
+        assert_eq!(h.game("cs2.exe").unwrap().title, "Counter-Strike 2");
+        h.delete_widget(&w.id);
+        assert!(h.widgets().is_empty());
+    }
+
 }

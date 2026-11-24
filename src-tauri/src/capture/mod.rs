@@ -3,6 +3,7 @@
 //! sent to the agent, then `encode` turns them into JPEG at full resolution.
 
 mod encode;
+pub mod look;
 mod wgc;
 
 use std::sync::mpsc;

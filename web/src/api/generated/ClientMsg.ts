@@ -3,6 +3,7 @@ import type { Language } from "./Language";
 import type { PanelMode } from "./PanelMode";
 import type { ResizeEdge } from "./ResizeEdge";
 import type { SettingsValues } from "./SettingsValues";
+import type { WidgetRect } from "./WidgetRect";
 import type { ZoomStep } from "./ZoomStep";
 
 /**
@@ -12,4 +13,4 @@ export type ClientMsg = { "type": "ui.hide" } | { "type": "ui.setMode", mode: Pa
 /**
  * Start a new chat with this message (sent from the quick field).
  */
-newChat: boolean, } | { "type": "agent.setOption", id: string, value: string, } | { "type": "chat.cancel" } | { "type": "chat.new" } | { "type": "chat.open", id: string, } | { "type": "chat.delete", id: string, } | { "type": "game.update", exe: string, name: string | null, instructions: string, sources: string, } | { "type": "permission.respond", id: string, optionId: string | null, } | { "type": "lan.set", enabled: boolean, } | { "type": "lan.resetToken" } | { "type": "lan.chooseAdapter", adapter: string | null, } | { "type": "settings.save", values: SettingsValues, } | { "type": "settings.autostart", enabled: boolean, } | { "type": "settings.language", language: Language, } | { "type": "settings.capturing", active: boolean, } | { "type": "settings.resetPanelPlaces" } | { "type": "app.restart" } | { "type": "ui.openUrl", url: string, };
+newChat: boolean, } | { "type": "agent.setOption", id: string, value: string, } | { "type": "chat.cancel" } | { "type": "chat.new" } | { "type": "chat.open", id: string, } | { "type": "chat.delete", id: string, } | { "type": "game.update", exe: string, name: string | null, instructions: string, sources: string, } | { "type": "permission.respond", id: string, optionId: string | null, } | { "type": "lan.set", enabled: boolean, } | { "type": "lan.resetToken" } | { "type": "lan.chooseAdapter", adapter: string | null, } | { "type": "settings.save", values: SettingsValues, } | { "type": "settings.autostart", enabled: boolean, } | { "type": "settings.language", language: Language, } | { "type": "settings.capturing", active: boolean, } | { "type": "settings.resetPanelPlaces" } | { "type": "app.restart" } | { "type": "ui.openUrl", url: string, } | { "type": "widget.toggleItem", id: string, itemId: string, } | { "type": "widget.set", id: string, x?: number, y?: number, width?: number, translucent?: boolean, collapsed?: boolean, } | { "type": "widget.delete", id: string, } | { "type": "widgets.rects", rects: Array<WidgetRect>, } | { "type": "progress.add", exe: string, text: string, } | { "type": "progress.edit", id: string, text: string, } | { "type": "progress.delete", id: string, };

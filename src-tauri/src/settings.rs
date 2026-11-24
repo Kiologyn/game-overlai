@@ -54,6 +54,7 @@ fn values_of(cfg: &Config) -> SettingsValues {
         agent_max_height: cfg.capture.agent_max_height,
         lan_port: cfg.lan.port,
         notifications: cfg.notifications.enabled,
+        progress_memory: cfg.memory.progress,
     }
 }
 
@@ -102,6 +103,7 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     cfg.capture.agent_max_height = v.agent_max_height;
     cfg.lan.port = v.lan_port;
     cfg.notifications.enabled = v.notifications;
+    cfg.memory.progress = v.progress_memory;
     Ok(())
 }
 
