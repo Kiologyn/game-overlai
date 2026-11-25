@@ -64,10 +64,12 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         }
     }
 
+    // This tab is recording a hotkey (our hotkeys are off meanwhile).
+    let mut capturing = false;
     loop {
         tokio::select! {
             incoming = stream.next() => match incoming {
-                Some(Ok(Message::Text(text))) => handle(&ctx, kind, text.as_str()),
+                Some(Ok(Message::Text(text))) => handle(&ctx, kind, text.as_str(), &mut capturing),
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Err(e)) => { debug!("ws error: {e}"); break; }
                 Some(Ok(_)) => {}
@@ -99,6 +101,10 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         }
     }
     debug!("ws disconnected: {kind:?}");
+    if capturing {
+        // The tab closed while recording a hotkey: ours come back.
+        overlay::run_on_main(&ctx.app, |app| crate::hotkeys::set_capturing(app, false));
+    }
 }
 
 async fn send(sink: &mut futures_util::stream::SplitSink<WebSocket, Message>, msg: &ServerMsg) -> Result<(), ()> {
@@ -106,7 +112,7 @@ async fn send(sink: &mut futures_util::stream::SplitSink<WebSocket, Message>, ms
     sink.send(Message::Text(text.into())).await.map_err(|_| ())
 }
 
-fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
+fn handle(ctx: &Ctx, kind: ClientKind, text: &str, capturing: &mut bool) {
     let msg = match serde_json::from_str::<ClientMsg>(text) {
         Ok(m) => m,
         Err(e) => {
@@ -196,6 +202,7 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         ClientMsg::SettingsAutostart { enabled } => settings::set_autostart(&ctx.state, enabled),
         ClientMsg::SettingsLanguage { language } => settings::set_language(&ctx.state, language),
         ClientMsg::SettingsCapturing { active } => {
+            *capturing = active;
             overlay::run_on_main(&ctx.app, move |app| crate::hotkeys::set_capturing(app, active))
         }
         ClientMsg::SettingsResetPanelPlaces => {
