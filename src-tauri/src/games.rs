@@ -4,10 +4,10 @@
 //! the browser page of a game edits it. Every chat of the game gets the profile in its system
 //! prompt (`chat::system_prompt`), from its next question.
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::history::ProfileEdit;
-use crate::protocol::{GameProfile, ServerMsg};
+use crate::protocol::{GameHotkeys, GameProfile, ServerMsg};
 use crate::state::{AppState, Target};
 
 /// Longer texts are cut (they go into every prompt of the game's chats).
@@ -23,6 +23,26 @@ pub fn list(state: &AppState) -> ServerMsg {
 pub fn broadcast(state: &AppState, exe: &str) {
     if let Some(game) = state.history.game(exe) {
         state.hub.send(Target::All, ServerMsg::GamesUpsert { game });
+    }
+}
+
+/// A game's own hotkeys from its page. Refused ones: the page gets the stored ones back.
+pub fn set_hotkeys(state: &AppState, exe: &str, keys: &GameHotkeys) {
+    let exe = exe.trim();
+    if exe.is_empty() {
+        return;
+    }
+    match crate::hotkeys::check_game(&state.cfg().hotkeys, keys) {
+        Ok(keys) => {
+            if let Some(game) = state.history.set_game_hotkeys(exe, &known_title(state, exe), &keys) {
+                info!("game hotkeys {exe}: {keys:?}");
+                state.hub.send(Target::All, ServerMsg::GamesUpsert { game });
+            }
+        }
+        Err(e) => {
+            warn!("game hotkeys {exe} refused: {e}");
+            broadcast(state, exe);
+        }
     }
 }
 

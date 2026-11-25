@@ -161,6 +161,11 @@ export function App({ conn }: { conn: Connection }) {
                 chatId={ui.chatId}
                 widgets={ui.widgets.filter((w) => sameExe(w.exe, gameProfile.exe))}
                 memoryOn={ui.settings ? ui.settings.values.progressMemory : null}
+                globalHotkeys={
+                  ui.settings
+                    ? { quick: ui.settings.values.hotkeyQuick, chat: ui.settings.values.hotkeyChat, focus: ui.settings.values.hotkeyFocus }
+                    : null
+                }
                 send={(msg) => conn.send(msg)}
                 onSave={(p) =>
                   conn.send({

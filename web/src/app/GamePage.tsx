@@ -2,13 +2,15 @@
 // its chats. The profile applies to the game's chats from their next question.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, MessageSquare, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, MessageSquare, Plus, Power, RotateCcw, Trash2, X } from "lucide-react";
 import type { ChatSummary } from "../api/generated/ChatSummary";
 import type { ClientMsg } from "../api/generated/ClientMsg";
+import type { GameHotkeys } from "../api/generated/GameHotkeys";
 import type { GameProfile } from "../api/generated/GameProfile";
 import type { ProgressNote } from "../api/generated/ProgressNote";
 import type { Widget } from "../api/generated/Widget";
-import { htmlLang, useLanguage, useT } from "../i18n";
+import { HotkeyInput, prettyHotkey } from "../components/HotkeyInput";
+import { htmlLang, useLanguage, useT, type T } from "../i18n";
 
 interface Props {
   profile: GameProfile;
@@ -21,6 +23,8 @@ interface Props {
   widgets: Widget[];
   /** Progress memory on (settings); null: unknown (a phone doesn't get the settings). */
   memoryOn: boolean | null;
+  /** The hotkeys from the settings; null: unknown (a phone: it can't set a game's own ones). */
+  globalHotkeys: GameHotkeys | null;
   send(msg: ClientMsg): void;
 }
 
@@ -41,7 +45,7 @@ const sameForm = (a: Form, b: Form) =>
   a.instructions.trim() === b.instructions.trim() &&
   a.sources.trim() === b.sources.trim();
 
-export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack, widgets, memoryOn, send }: Props) {
+export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack, widgets, memoryOn, globalHotkeys, send }: Props) {
   const t = useT();
   const language = useLanguage();
   const date = useMemo(
@@ -149,6 +153,7 @@ export function GamePage({ profile, chats, chatId, onSave, onOpenChat, onBack, w
 
       <ProgressSection exe={profile.exe} notes={profile.progress} memoryOn={memoryOn} send={send} />
       <WidgetsSection widgets={widgets} send={send} />
+      {globalHotkeys && <HotkeysSection exe={profile.exe} own={profile.hotkeys} global={globalHotkeys} send={send} />}
 
       <section className="game-chats">
         <h2>{t("game_chats")}{chats.length ? ` · ${chats.length}` : ""}</h2>
@@ -273,6 +278,70 @@ function WidgetsSection({ widgets, send }: { widgets: Widget[]; send: Props["sen
           </div>
         );
       })}
+    </section>
+  );
+}
+
+const ACTIONS = [
+  { key: "quick", code: "hotkey_quick" },
+  { key: "chat", code: "hotkey_chat" },
+  { key: "focus", code: "hotkey_focus" },
+] as const;
+
+/** Which actions would share a combination with these own values (they are refused). */
+function clashes(own: GameHotkeys, global: GameHotkeys): boolean {
+  const on = ACTIONS.map(({ key }) => own[key] || global[key]).filter((k) => k !== "off");
+  return new Set(on).size !== on.length;
+}
+
+const hotkeyLabel = (t: T, own: string, global: string) =>
+  own === "off" ? t("hotkey_off") : own ? prettyHotkey(own) : t("hotkey_global", { keys: prettyHotkey(global) });
+
+/** The game's own hotkeys (while it is in the foreground): another combination, or none. */
+function HotkeysSection({ exe, own, global, send }: { exe: string; own: GameHotkeys; global: GameHotkeys; send: Props["send"] }) {
+  const t = useT();
+  const [clash, setClash] = useState(false);
+  const change = (key: keyof GameHotkeys, value: string) => {
+    const next = { ...own, [key]: value };
+    const bad = clashes(next, global);
+    setClash(bad);
+    if (!bad) send({ type: "game.hotkeys", exe, hotkeys: next });
+  };
+  return (
+    <section className="game-hotkeys">
+      <h2>{t("game_hotkeys")}</h2>
+      <p className="field-hint">{t("game_hotkeys_hint")}</p>
+      {ACTIONS.map(({ key, code }) => {
+        const value = own[key];
+        return (
+          <div key={key} className="game-hotkey-row">
+            <span>{t(code)}</span>
+            {value === "off" ? (
+              <span className="hotkey-input placeholder">{hotkeyLabel(t, value, global[key])}</span>
+            ) : (
+              <HotkeyInput send={send} value={value} placeholder={hotkeyLabel(t, "", global[key])} onChange={(v) => change(key, v)} />
+            )}
+            <button
+              type="button"
+              className={`icon-btn${value === "off" ? " active" : ""}`}
+              title={value === "off" ? t("hotkey_turn_on") : t("hotkey_turn_off")}
+              onClick={() => change(key, value === "off" ? "" : "off")}
+            >
+              <Power size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title={t("hotkey_use_global")}
+              disabled={value === ""}
+              onClick={() => change(key, "")}
+            >
+              <RotateCcw size={14} />
+            </button>
+          </div>
+        );
+      })}
+      {clash && <p className="settings-warn">{t("err_hotkeys_same")}</p>}
     </section>
   );
 }

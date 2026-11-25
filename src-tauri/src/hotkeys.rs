@@ -1,5 +1,8 @@
-use std::sync::Arc;
+//! Global hotkeys: the ones from the settings, or a game's own while it is in the foreground
+//! (its page in the browser sets them: a combination the game itself uses, or none at all).
+
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Manager, Wry};
@@ -8,11 +11,83 @@ use tracing::{info, warn};
 
 use crate::config::Hotkeys;
 use crate::overlay;
-use crate::protocol::PanelMode;
+use crate::overlay::win32;
+use crate::protocol::{GameHotkeys, PanelMode};
 use crate::state::{AppState, HotkeySet};
 
 /// The settings page is recording a new hotkey: ours are off meanwhile.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
+
+/// The app in the foreground whose hotkeys are registered (lowercase exe; "" = none known) and
+/// its own ones. Our windows (the panel) keep the game's: the focus hotkey must still work there.
+static FOREGROUND: Mutex<(String, GameHotkeys)> = Mutex::new((
+    String::new(),
+    GameHotkeys { quick: String::new(), chat: String::new(), focus: String::new() },
+));
+
+/// With a game's own values ("" = the global one; "off" stays "off": `HotkeySet` skips it).
+pub fn effective(global: &Hotkeys, game: &GameHotkeys) -> Hotkeys {
+    let pick = |own: &str, global: &str| if own.is_empty() { global.to_string() } else { own.to_string() };
+    Hotkeys {
+        quick: pick(&game.quick, &global.quick),
+        chat: pick(&game.chat, &global.chat),
+        focus: pick(&game.focus, &global.focus),
+    }
+}
+
+/// Checks a game's own hotkeys against each other and the global ones they leave in place.
+/// Ok: in the core's form. Err: why not, for the user.
+pub fn check_game(global: &Hotkeys, keys: &GameHotkeys) -> Result<GameHotkeys, String> {
+    // Err: the unrecognized text.
+    let norm = |s: &str| -> Result<String, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" => Ok(String::new()),
+            "off" => Ok("off".into()),
+            _ => crate::settings::normalize_hotkey(s),
+        }
+    };
+    let keys = GameHotkeys {
+        quick: norm(&keys.quick).map_err(|keys| tr!("err_hotkey_quick", keys = keys))?,
+        chat: norm(&keys.chat).map_err(|keys| tr!("err_hotkey_chat", keys = keys))?,
+        focus: norm(&keys.focus).map_err(|keys| tr!("err_hotkey_focus", keys = keys))?,
+    };
+    let all = effective(global, &keys);
+    let on: Vec<&String> = [&all.quick, &all.chat, &all.focus].into_iter().filter(|k| *k != "off").collect();
+    if (0..on.len()).any(|i| on[i + 1..].contains(&on[i])) {
+        return Err(tr!("err_hotkeys_same"));
+    }
+    Ok(keys)
+}
+
+/// Focus went to another window: its game's own hotkeys, or the global ones. Main thread.
+pub fn follow_foreground(app: &AppHandle, fg: windows::Win32::Foundation::HWND) {
+    if fg.is_invalid() || win32::is_own(fg) {
+        return; // the panel over the game keeps the game's hotkeys
+    }
+    let exe = if win32::is_shell_window(fg) { String::new() } else { win32::process_exe(fg).unwrap_or_default().to_lowercase() };
+    let st = app.state::<Arc<AppState>>();
+    let own = st.history.game_hotkeys(&exe);
+    let changed = {
+        let mut now = FOREGROUND.lock().unwrap();
+        let changed = now.1 != own;
+        *now = (exe.clone(), own);
+        changed
+    };
+    if changed {
+        info!("hotkeys of {}", if exe.is_empty() { "the settings" } else { &exe });
+        reload(app);
+    }
+}
+
+/// A game's own hotkeys were edited: applied at once if it is in the foreground now.
+pub fn game_changed(app: &AppHandle, exe: &str) {
+    let now = FOREGROUND.lock().unwrap().0.clone();
+    if !now.is_empty() && now.eq_ignore_ascii_case(exe) {
+        let own = app.state::<Arc<AppState>>().history.game_hotkeys(exe);
+        FOREGROUND.lock().unwrap().1 = own;
+        reload(app);
+    }
+}
 
 /// The plugin dispatches every registered shortcut to this handler (runs on the main thread).
 pub fn plugin() -> TauriPlugin<Wry> {
@@ -69,7 +144,8 @@ pub fn reload(app: &AppHandle) {
     if let Err(e) = app.global_shortcut().unregister_all() {
         warn!("could not unregister hotkeys: {e}");
     }
-    *st.hotkeys.lock().unwrap() = HotkeySet::parse(&st.cfg().hotkeys);
+    let own = FOREGROUND.lock().unwrap().1.clone();
+    *st.hotkeys.lock().unwrap() = HotkeySet::parse(&effective(&st.cfg().hotkeys, &own));
     let failed = if active(&st) { register(app) } else { vec![] };
     *st.failed_hotkeys.lock().unwrap() = failed;
     crate::tray::refresh_hotkeys(app);
@@ -180,6 +256,23 @@ mod tests {
         avoid_altgr(&mut keys);
         assert_eq!(keys.quick, "ctrl+alt+a");
         assert_ne!(keys.focus, "ctrl+alt+a");
+    }
+
+    #[test]
+    fn game_hotkeys_over_the_global_ones() {
+        let global = Hotkeys::default();
+        let own = GameHotkeys { quick: "Ctrl+Shift+Q".into(), chat: "off".into(), focus: String::new() };
+        let ok = check_game(&global, &own).unwrap();
+        assert_eq!(ok.quick, "ctrl+shift+q");
+        let all = effective(&global, &ok);
+        assert_eq!((all.quick.as_str(), all.chat.as_str(), all.focus.as_str()), ("ctrl+shift+q", "off", "ctrl+alt+a"));
+        // The same as a global one it leaves in place; two off are fine; nonsense.
+        assert!(check_game(&global, &GameHotkeys { quick: "ctrl+alt+a".into(), ..Default::default() }).is_err());
+        assert!(check_game(&global, &GameHotkeys { quick: "off".into(), chat: "off".into(), ..Default::default() }).is_ok());
+        assert!(check_game(&global, &GameHotkeys { focus: "ctrl+nonsense".into(), ..Default::default() }).is_err());
+        // Swapping two of them is fine.
+        let swap = GameHotkeys { quick: "ctrl+alt+w".into(), chat: "ctrl+alt+q".into(), ..Default::default() };
+        assert!(check_game(&global, &swap).is_ok());
     }
 
     /// The layouts installed here and what Ctrl+Alt types in them (cargo test -- --ignored --nocapture).

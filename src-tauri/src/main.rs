@@ -106,6 +106,8 @@ fn main() {
                 tracing::warn!("widget layer: {e}"); // the app works without widgets
             }
             *state.failed_hotkeys.lock().unwrap() = hotkeys::register(&handle);
+            // A game already in the foreground: its own hotkeys (if it has any).
+            hotkeys::follow_foreground(&handle, overlay::win32::foreground());
             tray::build(app)?;
             lan::start_if_enabled(&state);
             notify::register_app_id();

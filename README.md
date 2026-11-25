@@ -27,7 +27,8 @@ needs the screen; its first frame after the hotkey is the one grabbed as the pan
 the chat in a browser is at http://127.0.0.1:47823/.
 
 Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys (Ctrl+Alt by default: games
-almost never bind it; letters that type a character with AltGr in an installed keyboard layout are skipped), agent (Claude Code or Codex),
+almost never bind it; letters that type a character with AltGr in an installed keyboard layout are skipped;
+a game's page can give it its own combinations or turn some off while the game is in the foreground), agent (Claude Code or Codex),
 proxy, default panel size, frame size for the agent, phone port, notifications, start with Windows.
 Hotkeys and most values apply at once; the agent, proxy and ports after the restart the page offers.
 

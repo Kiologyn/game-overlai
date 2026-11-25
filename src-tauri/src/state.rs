@@ -139,6 +139,7 @@ pub struct HotkeySet {
 impl HotkeySet {
     pub fn parse(keys: &crate::config::Hotkeys) -> Self {
         let parse = |name: &str, s: &str| match s.parse::<Shortcut>() {
+            _ if s.is_empty() || s == "off" => None, // off in this game
             Ok(sc) => Some(sc),
             Err(e) => {
                 warn!("hotkey {name} = {s:?} is invalid ({e}); it is disabled");

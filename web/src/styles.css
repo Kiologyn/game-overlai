@@ -1285,7 +1285,8 @@ html[data-surface="overlay"] .shot-viewer {
 
 .game-chats h2,
 .game-progress h2,
-.game-widgets h2 {
+.game-widgets h2,
+.game-hotkeys h2 {
   margin: 0 0 6px;
   font-size: 13px;
   font-weight: 600;
@@ -1954,6 +1955,64 @@ html[data-surface="overlay"] .shot-viewer {
 .widget-row-meta {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ game page: own hotkeys */
+
+.game-hotkeys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-hotkeys .field-hint {
+  margin: 0 0 4px;
+}
+
+.game-hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.game-hotkey-row > span:first-child {
+  flex: 0 0 150px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.game-hotkey-row .hotkey-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotkey-input.placeholder {
+  color: var(--muted);
+}
+
+span.hotkey-input {
+  cursor: default;
+  border-style: dashed;
+}
+
+.game-hotkey-row .icon-btn.active {
+  color: var(--warn);
+}
+
+.game-hotkey-row .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+@media (max-width: 480px) {
+  .game-hotkey-row > span:first-child {
+    flex-basis: 96px;
+  }
 }
 
 /* ------------------------------------------------------------------ widget layer over the game */

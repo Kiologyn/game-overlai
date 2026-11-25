@@ -177,12 +177,17 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str) {
         | ClientMsg::SettingsAutostart { .. }
         | ClientMsg::SettingsLanguage { .. }
         | ClientMsg::SettingsCapturing { .. }
+        | ClientMsg::GameSetHotkeys { .. }
         | ClientMsg::SettingsResetPanelPlaces
         | ClientMsg::AppRestart
         | ClientMsg::WidgetRects { .. }
             if ctx.lan =>
         {
             warn!("LAN device sent a local-only message: ignored");
+        }
+        ClientMsg::GameSetHotkeys { exe, hotkeys } => {
+            games::set_hotkeys(&ctx.state, &exe, &hotkeys);
+            overlay::run_on_main(&ctx.app, move |app| crate::hotkeys::game_changed(app, &exe));
         }
         ClientMsg::LanSet { enabled } => lan::set_enabled(&ctx.state, enabled),
         ClientMsg::LanResetToken => lan::reset_token(&ctx.state),

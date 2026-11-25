@@ -111,7 +111,7 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
 }
 
 /// The hotkey in the core's form; Err: the unrecognized text.
-fn normalize_hotkey(s: &str) -> Result<String, String> {
+pub fn normalize_hotkey(s: &str) -> Result<String, String> {
     let s = s.trim().to_ascii_lowercase().replace(' ', "");
     match s.parse::<tauri_plugin_global_shortcut::Shortcut>() {
         Ok(_) if !s.is_empty() => Ok(s),

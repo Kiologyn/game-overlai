@@ -97,6 +97,7 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
     let on_focus = app.clone();
     let watching = win32::watch_foreground(move |fg| {
         crate::widgets::refresh(&on_focus); // the widgets of the game in the foreground
+        crate::hotkeys::follow_foreground(&on_focus, fg); // and its own hotkeys
         if fg.is_invalid() || win32::is_own(fg) || !self::state(&on_focus).overlay.lock().unwrap().visible {
             return;
         }

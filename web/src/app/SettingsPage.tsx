@@ -1,9 +1,10 @@
 // /settings on this PC: language, hotkeys, agent, proxy, panel, frames, phone port,
 // notifications, starting with Windows. The core sends the settings to this PC's UI only.
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Settings as SettingsIcon } from "lucide-react";
 import type { Connection } from "../api/connection";
+import { HotkeyInput, prettyHotkey } from "../components/HotkeyInput";
 import type { SettingsValues } from "../api/generated/SettingsValues";
 import { useUiState } from "../api/hooks";
 import { LANGUAGES, useLanguage, useT } from "../i18n";
@@ -116,15 +117,15 @@ export function SettingsPage({ conn }: { conn: Connection }) {
           <h2>{t("hotkeys")}</h2>
           <div className="settings-row">
             <span>{t("hotkey_quick")}</span>
-            <HotkeyInput conn={conn} value={form.hotkeyQuick} onChange={(v) => set("hotkeyQuick", v)} />
+            <HotkeyInput send={(m) => conn.send(m)} value={form.hotkeyQuick} onChange={(v) => set("hotkeyQuick", v)} />
           </div>
           <div className="settings-row">
             <span>{t("hotkey_chat")}</span>
-            <HotkeyInput conn={conn} value={form.hotkeyChat} onChange={(v) => set("hotkeyChat", v)} />
+            <HotkeyInput send={(m) => conn.send(m)} value={form.hotkeyChat} onChange={(v) => set("hotkeyChat", v)} />
           </div>
           <div className="settings-row">
             <span>{t("hotkey_focus")}</span>
-            <HotkeyInput conn={conn} value={form.hotkeyFocus} onChange={(v) => set("hotkeyFocus", v)} />
+            <HotkeyInput send={(m) => conn.send(m)} value={form.hotkeyFocus} onChange={(v) => set("hotkeyFocus", v)} />
           </div>
           {settings.hotkeysTaken.length > 0 && (
             <p className="settings-warn">{t("hotkeys_taken", { keys: settings.hotkeysTaken.map(prettyHotkey).join(", ") })}</p>
@@ -298,61 +299,5 @@ export function SettingsPage({ conn }: { conn: Connection }) {
         game-overlai {settings.version} · {t("settings_about", { config: settings.configFile, data: settings.dataDir })}
       </p>
     </div>
-  );
-}
-
-/** "alt+q" -> "Alt+Q" (as in the tray menu). */
-function prettyHotkey(s: string): string {
-  const names: Record<string, string> = { ctrl: "Ctrl", control: "Ctrl", alt: "Alt", shift: "Shift", super: "Win" };
-  return s
-    .split("+")
-    .map((p) => names[p.trim().toLowerCase()] ?? p.trim().charAt(0).toUpperCase() + p.trim().slice(1))
-    .join("+");
-}
-
-/** The key of a keydown as the core's hotkey syntax names it. */
-function keyName(e: KeyboardEvent): string | null {
-  const code = e.code;
-  if (/^(Control|Alt|Shift|Meta|OS)(Left|Right)?$/.test(code) || code === "") return null;
-  if (code.startsWith("Key")) return code.slice(3).toLowerCase();
-  if (code.startsWith("Digit")) return code.slice(5);
-  if (/^F\d+$/.test(code)) return code.toLowerCase();
-  if (code === "Space") return "space";
-  return code;
-}
-
-/** Records a key combination; our global hotkeys are off while it has focus. */
-function HotkeyInput({ conn, value, onChange }: { conn: Connection; value: string; onChange(v: string): void }) {
-  const t = useT();
-  const [recording, setRecording] = useState(false);
-  const setCapturing = (active: boolean) => {
-    setRecording(active);
-    conn.send({ type: "settings.capturing", active });
-  };
-  useEffect(() => () => conn.send({ type: "settings.capturing", active: false }), [conn]);
-
-  return (
-    <button
-      type="button"
-      className={`hotkey-input${recording ? " recording" : ""}`}
-      onFocus={() => setCapturing(true)}
-      onBlur={() => setCapturing(false)}
-      onKeyDown={(e) => {
-        if (e.key === "Tab") return;
-        e.preventDefault();
-        if (e.key === "Escape") {
-          (e.target as HTMLElement).blur();
-          return;
-        }
-        const key = keyName(e);
-        if (!key) return; // only a modifier so far
-        const mods = [e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", e.metaKey && "super"].filter(Boolean);
-        if (mods.length === 0 && !/^f\d+$/.test(key)) return; // a plain letter would fire while typing
-        onChange([...mods, key].join("+"));
-        (e.target as HTMLElement).blur();
-      }}
-    >
-      {recording ? t("press_combination") : prettyHotkey(value)}
-    </button>
   );
 }

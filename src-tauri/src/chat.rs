@@ -893,6 +893,7 @@ mod tests {
             instructions: "  без спойлеров  ".into(),
             sources: "hollowknight.wiki\n\n  fextralife.com ".into(),
             progress: vec![],
+            hotkeys: Default::default(),
         };
         let p = system_prompt(Some(&game), Some(&profile), false);
         assert!(p.contains("The game is Hollow Knight (window \"UnityWndClass\""), "{p}");
@@ -918,6 +919,7 @@ mod tests {
             instructions: String::new(),
             sources: String::new(),
             progress: vec![note("a1", "Chapter 3"), note("b2", "Plays a mage")],
+            hotkeys: Default::default(),
         };
         let off = system_prompt(Some(&game), Some(&profile), false);
         assert!(!off.contains("progress_add") && !off.contains("Chapter 3"), "memory off: nothing about it");

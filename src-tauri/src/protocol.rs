@@ -93,6 +93,20 @@ pub struct GameProfile {
     pub sources: String,
     /// What the agent remembers about the user's progress (oldest first).
     pub progress: Vec<ProgressNote>,
+    /// Hotkeys of its own while the game is in the foreground.
+    #[serde(default)]
+    pub hotkeys: GameHotkeys,
+}
+
+/// A game's own hotkeys (they apply while it is in the foreground): "" = the one from the
+/// settings, "off" = none in this game, else a combination like "ctrl+shift+q".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct GameHotkeys {
+    pub quick: String,
+    pub chat: String,
+    pub focus: String,
 }
 
 /// A lasting fact about the user's progress in a game (chapter, build, finished quests...),
@@ -535,6 +549,9 @@ pub enum ClientMsg {
         instructions: String,
         sources: String,
     },
+    /// A game's own hotkeys (this PC's UI only: recording a combination needs its keyboard).
+    #[serde(rename = "game.hotkeys")]
+    GameSetHotkeys { exe: String, hotkeys: GameHotkeys },
     /// `optionId: null` = dismiss (the agent treats it as cancelled).
     #[serde(rename = "permission.respond", rename_all = "camelCase")]
     PermissionRespond { id: String, option_id: Option<String> },

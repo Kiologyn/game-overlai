@@ -14,10 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, params};
 use tracing::{info, warn};
 
-use crate::protocol::{ChatMessage, ChatSummary, GameInfo, GameProfile, ProgressNote, Shot, Widget};
+use crate::protocol::{ChatMessage, ChatSummary, GameHotkeys, GameInfo, GameProfile, ProgressNote, Shot, Widget};
 
 /// Bumped with every schema change; `migrate` brings older files up to date.
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE games (
@@ -104,6 +104,11 @@ CREATE TABLE widgets (
     created_at  INTEGER NOT NULL
 );
 CREATE INDEX widgets_by_game ON widgets(game_exe, created_at);
+";
+
+/// A game's own hotkeys (protocol::GameHotkeys as JSON; NULL = the ones from the settings).
+const SCHEMA_V7: &str = "
+ALTER TABLE games ADD COLUMN hotkeys TEXT;
 ";
 
 /// Where the user put the overlay panel over a game, relative to the game window (so it stays
@@ -503,6 +508,30 @@ impl History {
         self.game(exe)
     }
 
+    /// A game's own hotkeys (all "" for a game without them or not seen yet).
+    pub fn game_hotkeys(&self, exe: &str) -> GameHotkeys {
+        if exe.is_empty() {
+            return GameHotkeys::default();
+        }
+        let json: Option<Option<String>> = self.read("game hotkeys", |db| {
+            db.query_row("SELECT hotkeys FROM games WHERE exe = ?1", [exe], |r| r.get(0)).optional()
+        });
+        hotkeys_of(json.flatten())
+    }
+
+    /// Saves a game's own hotkeys (a game not seen yet is added with `title`).
+    pub fn set_game_hotkeys(&self, exe: &str, title: &str, keys: &GameHotkeys) -> Option<GameProfile> {
+        if exe.is_empty() {
+            return None;
+        }
+        let json = (*keys != GameHotkeys::default()).then(|| serde_json::to_string(keys).ok()).flatten();
+        self.write("game hotkeys", |db| {
+            ensure_game(db, exe, title)?;
+            db.execute("UPDATE games SET hotkeys = ?2 WHERE exe = ?1", params![exe, json]).map(drop)
+        });
+        self.game(exe)
+    }
+
     pub fn panel_layout(&self, game_exe: &str) -> Option<PanelLayout> {
         self.read("panel layout", |db| {
             db.query_row(
@@ -541,7 +570,7 @@ impl History {
     }
 }
 
-const GAME: &str = "SELECT exe, title, name, instructions, sources FROM games";
+const GAME: &str = "SELECT exe, title, name, instructions, sources, hotkeys FROM games";
 
 fn game_row(r: &rusqlite::Row) -> rusqlite::Result<GameProfile> {
     Ok(GameProfile {
@@ -551,7 +580,12 @@ fn game_row(r: &rusqlite::Row) -> rusqlite::Result<GameProfile> {
         instructions: r.get(3)?,
         sources: r.get(4)?,
         progress: Vec::new(),
+        hotkeys: hotkeys_of(r.get(5)?),
     })
+}
+
+fn hotkeys_of(json: Option<String>) -> GameHotkeys {
+    json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default()
 }
 
 fn note_row(r: &rusqlite::Row, at: usize) -> rusqlite::Result<ProgressNote> {
@@ -633,6 +667,9 @@ fn migrate(db: &Connection) -> rusqlite::Result<()> {
     }
     if version < 6 {
         db.execute_batch(&format!("BEGIN; {SCHEMA_V6} PRAGMA user_version = 6; COMMIT;"))?;
+    }
+    if version < 7 {
+        db.execute_batch(&format!("BEGIN; {SCHEMA_V7} PRAGMA user_version = 7; COMMIT;"))?;
     }
     Ok(())
 }
@@ -795,6 +832,19 @@ mod tests {
         assert_eq!(h.game("cs2.exe").unwrap().title, "Counter-Strike 2");
         h.delete_widget(&w.id);
         assert!(h.widgets().is_empty());
+    }
+
+    #[test]
+    fn game_hotkeys() {
+        let h = History::in_memory(std::env::temp_dir().join("overlai-unused-shots"));
+        assert_eq!(h.game_hotkeys("pubg.exe"), GameHotkeys::default());
+        let keys = GameHotkeys { quick: "ctrl+shift+q".into(), focus: "off".into(), ..Default::default() };
+        let game = h.set_game_hotkeys("pubg.exe", "PUBG", &keys).unwrap();
+        assert_eq!((game.title.as_str(), &game.hotkeys), ("PUBG", &keys));
+        assert_eq!(h.game_hotkeys("PUBG.EXE"), keys);
+        assert_eq!(h.games()[0].hotkeys, keys);
+        h.set_game_hotkeys("pubg.exe", "", &GameHotkeys::default());
+        assert_eq!(h.game_hotkeys("pubg.exe"), GameHotkeys::default());
     }
 
 }
