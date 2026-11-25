@@ -175,6 +175,14 @@ pub fn window_rect(h: HWND) -> RECT {
     r
 }
 
+/// Shows a hidden window without activating it (the game keeps the keyboard).
+pub fn show_no_activate(h: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
+    unsafe {
+        let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+    }
+}
+
 pub fn set_foreground(h: HWND) -> bool {
     unsafe { SetForegroundWindow(h).as_bool() }
 }

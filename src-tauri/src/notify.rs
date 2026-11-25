@@ -11,9 +11,14 @@ use crate::state::AppState;
 /// Identifier of the app (tauri.conf.json); Windows shows notifications under it.
 const APP_ID: &str = "dev.gameoverlai.app";
 
-/// Notifications go out only when the panel is hidden and the user wants them.
+/// Notifications go out only when the panel is out of sight (closed, or put aside while
+/// another window is in front) and the user wants them.
 fn wanted(state: &AppState) -> bool {
-    state.cfg().notifications.enabled && !state.overlay.lock().unwrap().visible
+    let out_of_sight = {
+        let ov = state.overlay.lock().unwrap();
+        !ov.visible || ov.parked
+    };
+    state.cfg().notifications.enabled && out_of_sight
 }
 
 pub fn answer_ready(state: &AppState, title: Option<&str>, answer: &str) {

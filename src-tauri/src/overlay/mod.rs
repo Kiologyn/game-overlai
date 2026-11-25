@@ -10,8 +10,11 @@
 //! edge's centre stays put; the zoom is remembered per game too.
 //!
 //! The panel takes keyboard focus when shown and gives it back to the game when hidden.
-//! It may stay open without focus while the user clicks into the game; once focus goes to
-//! another app (neither the game nor the panel), it hides.
+//! It belongs to the game window it was opened over: it stays open while the user clicks into
+//! the game, and while another window is in front (the Start menu after a stray Win key,
+//! another app) it is only put aside ("parked": hidden, chat and draft kept). Once the game
+//! is in front again the panel is back over it, without taking the focus. Only Esc / ✕ / its
+//! hotkey close it, or the game window going away.
 //! All functions here must run on the main thread (use `run_on_main`).
 
 pub mod win32;
@@ -53,7 +56,7 @@ fn next_zoom(current: f64, step: ZoomStep, default: f64) -> f64 {
     }
 }
 
-/// Focus elsewhere this long hides the panel (not a window passing by on the way back).
+/// Focus elsewhere this long parks the panel (not a window passing by on the way back).
 const FOCUS_AWAY: Duration = Duration::from_millis(250);
 
 /// How long the hotkey waits for the game frame before showing the panel (~30 ms usually).
@@ -93,7 +96,8 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
         warn!("could not limit panel moves to the game window");
     }
 
-    // Focus went to another app: hide the panel (checked again after a moment).
+    // Another window in front: the panel is put aside (checked again after a moment); the
+    // game in front again: it is back.
     let on_focus = app.clone();
     let watching = win32::watch_foreground(move |fg| {
         crate::widgets::refresh(&on_focus); // the widgets of the game in the foreground
@@ -102,13 +106,17 @@ pub fn create(app: &AppHandle, state: &AppState) -> anyhow::Result<()> {
             return;
         }
         let app = on_focus.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(FOCUS_AWAY);
-            run_on_main(&app, hide_if_focus_away);
-        });
+        if is_game(&self::state(&on_focus), fg) {
+            run_on_main(&app, unpark);
+        } else {
+            std::thread::spawn(move || {
+                std::thread::sleep(FOCUS_AWAY);
+                run_on_main(&app, park_if_away);
+            });
+        }
     });
     if !watching {
-        warn!("could not watch the focus: the panel won't hide when another app gets it");
+        warn!("could not watch the focus: the panel stays over other apps");
     }
 
     // Alt+F4 on the panel hides it instead of destroying it.
@@ -270,6 +278,7 @@ pub fn show(app: &AppHandle, mode: PanelMode, source: ShowSource) {
         }
         ov.mode = mode;
         ov.visible = true;
+        ov.parked = false;
         (ov.game_hwnd, ov.game.clone())
     };
 
@@ -299,28 +308,60 @@ pub fn hide(app: &AppHandle) {
     hide_panel(app, true);
 }
 
-/// Focus is neither on the panel nor on the game (another app, the desktop, Start...): hide
-/// the panel, leaving the focus where the user put it.
-fn hide_if_focus_away(app: &AppHandle) {
+/// The window is the panel's game (or another window of its process: dialogs, launchers).
+fn is_game(st: &AppState, fg: windows::Win32::Foundation::HWND) -> bool {
+    let game = win32::hwnd(st.overlay.lock().unwrap().game_hwnd);
+    win32::is_alive(game) && (fg == game || win32::process_id(fg) == win32::process_id(game))
+}
+
+/// Another window is still in front (another app, the desktop, Start...): put the panel
+/// aside until the game is back, leaving the focus where the user put it. The game window
+/// gone: the panel closes.
+fn park_if_away(app: &AppHandle) {
+    let Some(w) = panel(app) else { return };
     let st = state(app);
-    let (visible, game_hwnd) = {
-        let ov = st.overlay.lock().unwrap();
-        (ov.visible, ov.game_hwnd)
-    };
     let fg = win32::foreground();
-    if !visible || fg.is_invalid() || win32::is_own(fg) {
+    {
+        let ov = st.overlay.lock().unwrap();
+        if !ov.visible || ov.parked {
+            return;
+        }
+    }
+    if fg.is_invalid() || win32::is_own(fg) || is_game(&st, fg) {
         return;
     }
-    let game = win32::hwnd(game_hwnd);
-    if win32::is_alive(game) && (fg == game || win32::process_id(fg) == win32::process_id(game)) {
-        return; // the user clicked into the game: the panel stays
+    let game = win32::hwnd(st.overlay.lock().unwrap().game_hwnd);
+    if !win32::is_alive(game) {
+        debug!("the game window is gone: closing the panel");
+        hide_panel(app, false);
+        return;
     }
+    st.overlay.lock().unwrap().parked = true;
+    let _ = w.hide();
     debug!(
-        "focus went to {:?} ({}): hiding the panel",
+        "{:?} ({}) in front: panel put aside until the game is back",
         win32::window_title(fg),
         win32::process_exe(fg).unwrap_or_default()
     );
-    hide_panel(app, false);
+}
+
+/// The game is in front again: the panel is back over it, where it was (the game window may
+/// have moved meanwhile), without taking the focus from the game.
+fn unpark(app: &AppHandle) {
+    let Some(w) = panel(app) else { return };
+    let st = state(app);
+    let (mode, game_hwnd) = {
+        let mut ov = st.overlay.lock().unwrap();
+        if !ov.visible || !ov.parked {
+            return;
+        }
+        ov.parked = false;
+        (ov.mode, ov.game_hwnd)
+    };
+    place(&st, &w, mode, game_hwnd);
+    win32::show_no_activate(panel_hwnd(&w));
+    let _ = w.set_always_on_top(true);
+    debug!("game in front again: panel back");
 }
 
 /// `give_focus_back`: activate the game (the user closed the panel), not when the focus is
@@ -331,6 +372,7 @@ fn hide_panel(app: &AppHandle, give_focus_back: bool) {
     let game_hwnd = {
         let mut ov = st.overlay.lock().unwrap();
         ov.visible = false;
+        ov.parked = false;
         ov.prefetch = None; // the next question is about a later moment
         ov.game_hwnd
     };
@@ -347,8 +389,12 @@ fn hide_panel(app: &AppHandle, give_focus_back: bool) {
 
 /// The widget layer came up (topmost too): the panel, if shown, stays above it.
 pub fn keep_panel_on_top(app: &AppHandle) {
-    let visible = state(app).overlay.lock().unwrap().visible;
-    if visible && let Some(w) = panel(app) {
+    let shown = {
+        let st = state(app);
+        let ov = st.overlay.lock().unwrap();
+        ov.visible && !ov.parked
+    };
+    if shown && let Some(w) = panel(app) {
         let _ = w.set_always_on_top(true);
     }
 }
