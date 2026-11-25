@@ -426,9 +426,11 @@ pub struct AgentOptionValue {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct SettingsValues {
-    /// e.g. "alt+q"
+    /// e.g. "ctrl+alt+q"
     pub hotkey_quick: String,
     pub hotkey_chat: String,
+    /// Focus between the game and the open panel.
+    pub hotkey_focus: String,
     /// "claude" | "codex"
     pub agent: String,
     /// "system" | "none" | "http://host:port"
@@ -675,7 +677,7 @@ pub enum ServerMsg {
     LanStatus { status: LanStatus },
     /// Settings page state (this PC's UI only).
     #[serde(rename = "settings")]
-    Settings { settings: Settings },
+    Settings { settings: Box<Settings> },
 }
 
 #[cfg(test)]

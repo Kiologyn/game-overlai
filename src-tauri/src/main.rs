@@ -111,7 +111,7 @@ fn main() {
             notify::register_app_id();
             debug_show_on_start(&handle);
             let keys = state.cfg().hotkeys;
-            info!("ready: {} = quick question, {} = chat", keys.quick, keys.chat);
+            info!("ready: {} = quick question, {} = chat, {} = focus game/panel", keys.quick, keys.chat, keys.focus);
             Ok(())
         })
         .build(tauri::generate_context!());

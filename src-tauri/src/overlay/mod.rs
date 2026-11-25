@@ -179,6 +179,33 @@ pub fn on_hotkey(app: &AppHandle, mode: PanelMode) {
     }
 }
 
+/// Focus hotkey: the keyboard goes between the game and the panel; the panel stays open.
+///   hidden                -> show the chat (focused)
+///   visible, unfocused    -> focus it, in its current mode
+///   visible, focused      -> focus back to the game (no game left: hide)
+pub fn toggle_focus(app: &AppHandle) {
+    let Some(w) = panel(app) else { return };
+    let me = panel_hwnd(&w);
+    let (mode, game_hwnd) = {
+        let st = state(app);
+        let ov = st.overlay.lock().unwrap();
+        (ov.mode, ov.game_hwnd)
+    };
+    if !w.is_visible().unwrap_or(false) {
+        show(app, PanelMode::Expanded, ShowSource::Hotkey);
+    } else if win32::foreground() != me {
+        show(app, mode, ShowSource::Hotkey);
+    } else {
+        let game = win32::hwnd(game_hwnd);
+        if win32::is_alive(game) && !win32::is_minimized(game) {
+            let how = win32::force_foreground(game);
+            debug!("focus back to the game, panel stays: {how}");
+        } else {
+            hide(app);
+        }
+    }
+}
+
 /// A question from a phone: the game is the window in the foreground on the PC right now (the
 /// panel may never have been opened over it). Our own windows and the desktop keep the game
 /// known so far.

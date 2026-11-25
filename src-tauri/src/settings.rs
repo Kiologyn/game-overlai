@@ -18,7 +18,7 @@ pub fn snapshot(state: &AppState) -> ServerMsg {
     let cfg = state.cfg();
     let (autostart, autostart_other) = autostart::status();
     ServerMsg::Settings {
-        settings: Settings {
+        settings: Box::new(Settings {
             values: values_of(&cfg),
             agents: spec::ALL
                 .iter()
@@ -32,7 +32,7 @@ pub fn snapshot(state: &AppState) -> ServerMsg {
             config_file: state.config_file.display().to_string(),
             data_dir: state.profiles_dir.parent().unwrap_or(&state.profiles_dir).display().to_string(),
             error: LAST_ERROR.lock().unwrap().clone(),
-        },
+        }),
     }
 }
 
@@ -44,6 +44,7 @@ fn values_of(cfg: &Config) -> SettingsValues {
     SettingsValues {
         hotkey_quick: cfg.hotkeys.quick.clone(),
         hotkey_chat: cfg.hotkeys.chat.clone(),
+        hotkey_focus: cfg.hotkeys.focus.clone(),
         agent: spec::by_id(&cfg.agent).id.into(),
         proxy: cfg.network.proxy.clone(),
         require_proxy_for: cfg.network.require_proxy_for.clone(),
@@ -62,7 +63,8 @@ fn values_of(cfg: &Config) -> SettingsValues {
 fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     let quick = normalize_hotkey(&v.hotkey_quick).map_err(|keys| tr!("err_hotkey_quick", keys = keys))?;
     let chat = normalize_hotkey(&v.hotkey_chat).map_err(|keys| tr!("err_hotkey_chat", keys = keys))?;
-    if quick == chat {
+    let focus = normalize_hotkey(&v.hotkey_focus).map_err(|keys| tr!("err_hotkey_focus", keys = keys))?;
+    if quick == chat || quick == focus || chat == focus {
         return Err(tr!("err_hotkeys_same"));
     }
     if !spec::ALL.iter().any(|s| s.id == v.agent) {
@@ -89,6 +91,7 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     }
     cfg.hotkeys.quick = quick;
     cfg.hotkeys.chat = chat;
+    cfg.hotkeys.focus = focus;
     cfg.agent = v.agent.clone();
     cfg.network.proxy = proxy;
     cfg.network.require_proxy_for = spec::ALL
@@ -365,7 +368,9 @@ mod tests {
     fn bad_values_are_refused() {
         let mut cfg = Config::default();
         let bad = [
-            SettingsValues { hotkey_quick: "alt+w".into(), ..values() },
+            SettingsValues { hotkey_quick: "ctrl+alt+w".into(), ..values() },
+            SettingsValues { hotkey_focus: "Ctrl+Alt+Q".into(), ..values() },
+            SettingsValues { hotkey_focus: "ctrl+alt+nonsense".into(), ..values() },
             SettingsValues { hotkey_quick: "alt+nonsense".into(), ..values() },
             SettingsValues { agent: "gpt".into(), ..values() },
             SettingsValues { proxy: "my proxy".into(), ..values() },
@@ -377,7 +382,7 @@ mod tests {
         for v in bad {
             assert!(apply(&v, &mut cfg).is_err(), "{v:?}");
         }
-        assert_eq!(cfg.hotkeys.quick, "alt+q", "nothing changes on error");
+        assert_eq!(cfg.hotkeys.quick, "ctrl+alt+q", "nothing changes on error");
         assert!(valid_proxy_url("http://user:pw@proxy.lan:3128/") && valid_proxy_url("127.0.0.1:10808"));
         assert!(!valid_proxy_url("http://proxy") && !valid_proxy_url(":80") && !valid_proxy_url("socks5://127.0.0.1:1080"));
     }

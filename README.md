@@ -19,14 +19,15 @@ scripts\windows\build.bat    # installer (per user, no admin) + portable exe -> 
 By hand: `cd web; npm install; npm run build`, then `cd src-tauri; cargo run`. On first start the app
 installs the pinned ACP adapter of the agent into `%LOCALAPPDATA%\game-overlai\agents\`.
 
-Using it: `Alt+Q` — quick question (starts a new chat), `Alt+W` — chat panel (the game's latest chat),
-`Esc` / ✕ — hide; it also hides when focus goes to another app (clicking into the game keeps it). The panel moves by its header (grip in the compact field) and resizes by its
+Using it: `Ctrl+Alt+Q` — quick question (starts a new chat), `Ctrl+Alt+W` — chat panel (the game's latest chat),
+`Ctrl+Alt+A` — keyboard focus between the game and the open panel (the panel stays), `Esc` / ✕ — hide; it also hides when focus goes to another app (clicking into the game keeps it). The panel moves by its header (grip in the compact field) and resizes by its
 edges, always inside the game window; its place is remembered per game. Ctrl + wheel / Ctrl +/− over the
 panel zoom it (content and window together, 50–200%, per game), Ctrl+0 — back to the default zoom. The agent looks at the game itself (`screenshot_game`) when a question
 needs the screen; its first frame after the hotkey is the one grabbed as the panel opened. The tray icon has the rest;
 the chat in a browser is at http://127.0.0.1:47823/.
 
-Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys, agent (Claude Code or Codex),
+Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys (Ctrl+Alt by default: games
+almost never bind it; letters that type a character with AltGr in an installed keyboard layout are skipped), agent (Claude Code or Codex),
 proxy, default panel size, frame size for the agent, phone port, notifications, start with Windows.
 Hotkeys and most values apply at once; the agent, proxy and ports after the restart the page offers.
 

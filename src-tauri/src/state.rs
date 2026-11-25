@@ -133,6 +133,7 @@ impl Default for OverlayState {
 pub struct HotkeySet {
     pub quick: Option<Shortcut>,
     pub chat: Option<Shortcut>,
+    pub focus: Option<Shortcut>,
 }
 
 impl HotkeySet {
@@ -144,7 +145,11 @@ impl HotkeySet {
                 None
             }
         };
-        Self { quick: parse("quick", &keys.quick), chat: parse("chat", &keys.chat) }
+        Self {
+            quick: parse("quick", &keys.quick),
+            chat: parse("chat", &keys.chat),
+            focus: parse("focus", &keys.focus),
+        }
     }
 }
 

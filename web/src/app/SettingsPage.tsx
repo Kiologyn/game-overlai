@@ -122,6 +122,10 @@ export function SettingsPage({ conn }: { conn: Connection }) {
             <span>{t("hotkey_chat")}</span>
             <HotkeyInput conn={conn} value={form.hotkeyChat} onChange={(v) => set("hotkeyChat", v)} />
           </div>
+          <div className="settings-row">
+            <span>{t("hotkey_focus")}</span>
+            <HotkeyInput conn={conn} value={form.hotkeyFocus} onChange={(v) => set("hotkeyFocus", v)} />
+          </div>
           {settings.hotkeysTaken.length > 0 && (
             <p className="settings-warn">{t("hotkeys_taken", { keys: settings.hotkeysTaken.map(prettyHotkey).join(", ") })}</p>
           )}

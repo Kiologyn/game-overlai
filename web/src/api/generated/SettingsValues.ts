@@ -5,9 +5,13 @@
  */
 export type SettingsValues = { 
 /**
- * e.g. "alt+q"
+ * e.g. "ctrl+alt+q"
  */
 hotkeyQuick: string, hotkeyChat: string, 
+/**
+ * Focus between the game and the open panel.
+ */
+hotkeyFocus: string, 
 /**
  * "claude" | "codex"
  */

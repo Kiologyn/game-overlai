@@ -114,6 +114,8 @@ pub struct Hotkeys {
     pub quick: String,
     /// Chat panel with the latest chat.
     pub chat: String,
+    /// Keyboard focus between the game and the open panel.
+    pub focus: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,7 +152,9 @@ impl Default for Config {
 
 impl Default for Hotkeys {
     fn default() -> Self {
-        Self { quick: "alt+q".into(), chat: "alt+w".into() }
+        // Ctrl+Alt: games almost never bind it (it is AltGr in many layouts); the letters are
+        // under the left hand that holds Ctrl (little finger) and Alt (thumb).
+        Self { quick: "ctrl+alt+q".into(), chat: "ctrl+alt+w".into(), focus: "ctrl+alt+a".into() }
     }
 }
 
@@ -170,15 +174,22 @@ fn lenient_language<'de, D: Deserializer<'de>>(d: D) -> Result<Language, D::Erro
 }
 
 const HEADER: &str = "# game-overlai settings. Delete a line to restore its default.\n\
-                      # Hotkeys use the form \"alt+q\", \"ctrl+shift+space\", ...\n\n";
+                      # Hotkeys use the form \"ctrl+alt+q\", \"ctrl+shift+space\", ...\n\n";
 
 /// Reads the config; creates it with defaults on first run. A broken file is left untouched
 /// (so the user can fix it) and defaults are used for this run.
 pub fn load(path: &Path) -> Config {
     match std::fs::read_to_string(path) {
         Ok(text) => match toml::from_str::<Config>(&text) {
-            Ok(cfg) => {
+            Ok(mut cfg) => {
                 info!("config loaded from {}", path.display());
+                if migrate_hotkeys(&text, &mut cfg.hotkeys) {
+                    crate::hotkeys::avoid_altgr(&mut cfg.hotkeys);
+                    info!("hotkeys moved to the new defaults: {:?}", cfg.hotkeys);
+                    if let Err(e) = save(path, &cfg) {
+                        warn!("could not save the config: {e}");
+                    }
+                }
                 cfg
             }
             Err(e) => {
@@ -187,7 +198,8 @@ pub fn load(path: &Path) -> Config {
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let cfg = Config::default();
+            let mut cfg = Config::default();
+            crate::hotkeys::avoid_altgr(&mut cfg.hotkeys);
             if let Err(e) = save(path, &cfg) {
                 warn!("could not write default config to {}: {e}", path.display());
             } else {
@@ -200,6 +212,27 @@ pub fn load(path: &Path) -> Config {
             Config::default()
         }
     }
+}
+
+/// Configs written before the focus hotkey have the old defaults Alt+Q / Alt+W (Alt is held in
+/// many games: free look, item highlight): those move to the new ones; the user's own stay.
+/// True: something changed (the config is saved again).
+fn migrate_hotkeys(text: &str, keys: &mut Hotkeys) -> bool {
+    let has_focus = toml::from_str::<toml::Table>(text)
+        .ok()
+        .and_then(|t| t.get("hotkeys")?.as_table()?.get("focus").cloned())
+        .is_some();
+    if has_focus {
+        return false;
+    }
+    let new = Hotkeys::default();
+    if keys.quick == "alt+q" {
+        keys.quick = new.quick;
+    }
+    if keys.chat == "alt+w" {
+        keys.chat = new.chat;
+    }
+    true
 }
 
 pub fn save(path: &Path, cfg: &Config) -> anyhow::Result<()> {
@@ -244,7 +277,7 @@ mod tests {
         assert_eq!(back.port, 47823);
         let partial: Config = toml::from_str("[hotkeys]\nquick = \"ctrl+space\"\n").unwrap();
         assert_eq!(partial.hotkeys.quick, "ctrl+space");
-        assert_eq!(partial.hotkeys.chat, "alt+w");
+        assert_eq!(partial.hotkeys.chat, "ctrl+alt+w");
         assert_eq!(partial.panel.width, 640.0);
         assert_eq!(partial.capture.agent_max_height, 720);
         assert_eq!(partial.lan.port, 47824);
@@ -255,6 +288,35 @@ mod tests {
         let strict: Config = toml::from_str("[network]\nrequire_proxy_for = [\"Claude\"]\n").unwrap();
         assert!(strict.network.requires_proxy("claude") && !strict.network.requires_proxy("codex"));
         assert_eq!(strict.network.proxy, "system");
+    }
+
+    #[test]
+    fn old_default_hotkeys_move_to_the_new_ones() {
+        let old = "[hotkeys]
+quick = \"alt+q\"
+chat = \"alt+w\"
+";
+        let mut cfg: Config = toml::from_str(old).unwrap();
+        assert!(migrate_hotkeys(old, &mut cfg.hotkeys));
+        assert_eq!(cfg.hotkeys, Hotkeys::default());
+        // The user's own combination stays; the focus key gets its default.
+        let own = "[hotkeys]
+quick = \"ctrl+shift+space\"
+chat = \"alt+w\"
+";
+        let mut cfg: Config = toml::from_str(own).unwrap();
+        assert!(migrate_hotkeys(own, &mut cfg.hotkeys));
+        assert_eq!((cfg.hotkeys.quick.as_str(), cfg.hotkeys.chat.as_str()), ("ctrl+shift+space", "ctrl+alt+w"));
+        assert_eq!(cfg.hotkeys.focus, "ctrl+alt+a");
+        // Written by this version: never touched again, even if it is Alt+Q.
+        let new = "[hotkeys]
+quick = \"alt+q\"
+chat = \"alt+w\"
+focus = \"alt+e\"
+";
+        let mut cfg: Config = toml::from_str(new).unwrap();
+        assert!(!migrate_hotkeys(new, &mut cfg.hotkeys));
+        assert_eq!(cfg.hotkeys.quick, "alt+q");
     }
 
     #[test]
