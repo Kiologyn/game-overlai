@@ -175,6 +175,31 @@ pub fn window_rect(h: HWND) -> RECT {
     r
 }
 
+/// Takes `panel` out of the topmost band and puts it right above `game` in the z-order: the
+/// panel stays drawn over the game in the background, and windows in front of the game (the
+/// Start menu, another app) cover both. The game keeps its place among the other windows.
+/// False: Windows refused (e.g. a game running as administrator).
+pub fn place_above(panel: HWND, game: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_NOTOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SetWindowPos,
+    };
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+    unsafe {
+        SetWindowPos(panel, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags).is_ok()
+            // right below the game, then the game right below the panel
+            && SetWindowPos(panel, Some(game), 0, 0, 0, 0, flags).is_ok()
+            && SetWindowPos(game, Some(panel), 0, 0, 0, 0, flags).is_ok()
+    }
+}
+
+/// Back into the topmost band, without activating it.
+pub fn make_topmost(h: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
+    unsafe {
+        let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 /// Shows a hidden window without activating it (the game keeps the keyboard).
 pub fn show_no_activate(h: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};

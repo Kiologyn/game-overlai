@@ -12,9 +12,11 @@
 //! The panel takes keyboard focus when shown and gives it back to the game when hidden.
 //! It belongs to the game window it was opened over: it stays open while the user clicks into
 //! the game, and while another window is in front (the Start menu after a stray Win key,
-//! another app) it is only put aside ("parked": hidden, chat and draft kept). Once the game
-//! is in front again the panel is back over it, without taking the focus. Only Esc / ✕ / its
-//! hotkey close it, or the game window going away.
+//! another app) it is "parked": out of the topmost band, right above the game in the z-order,
+//! so it is still drawn over the game in the background and the window in front covers both
+//! (hidden only while the game is minimized). Once the game is in front again the panel is
+//! topmost again, without taking the focus. Only Esc / ✕ / its hotkey close it, or the game
+//! window going away.
 //! All functions here must run on the main thread (use `run_on_main`).
 
 pub mod win32;
@@ -290,6 +292,7 @@ pub fn show(app: &AppHandle, mode: PanelMode, source: ShowSource) {
     }
     place(&st, &w, mode, game_hwnd);
     let _ = w.set_always_on_top(true); // re-assert: some games make themselves topmost
+    win32::make_topmost(me); // and after a park (tao doesn't know it was taken out)
     let _ = w.show();
     let how = win32::force_foreground(me);
     let _ = w.set_focus();
@@ -314,11 +317,18 @@ fn is_game(st: &AppState, fg: windows::Win32::Foundation::HWND) -> bool {
     win32::is_alive(game) && (fg == game || win32::process_id(fg) == win32::process_id(game))
 }
 
-/// Another window is still in front (another app, the desktop, Start...): put the panel
-/// aside until the game is back, leaving the focus where the user put it. The game window
+/// Parks: each one gets a number; a parked panel's watcher stops once it is no longer the last.
+static PARKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How often a parked panel checks its game window (minimized, restored, closed).
+const PARKED_CHECK: Duration = Duration::from_millis(400);
+
+/// Another window is still in front (another app, the desktop, Start...): the panel stays over
+/// the game, behind that window, leaving the focus where the user put it. The game window
 /// gone: the panel closes.
 fn park_if_away(app: &AppHandle) {
-    let Some(w) = panel(app) else { return };
+    if panel(app).is_none() {
+        return;
+    }
     let st = state(app);
     let fg = win32::foreground();
     {
@@ -337,12 +347,66 @@ fn park_if_away(app: &AppHandle) {
         return;
     }
     st.overlay.lock().unwrap().parked = true;
-    let _ = w.hide();
+    follow_parked_game(app);
     debug!(
-        "{:?} ({}) in front: panel put aside until the game is back",
+        "{:?} ({}) in front: panel stays over the game behind it",
         win32::window_title(fg),
         win32::process_exe(fg).unwrap_or_default()
     );
+    // The game can be minimized or closed from the taskbar while in the background (no
+    // foreground change): watched until the panel is back on top or closed.
+    let park = PARKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(PARKED_CHECK);
+            if PARKS.load(std::sync::atomic::Ordering::SeqCst) != park {
+                return;
+            }
+            let parked = {
+                let st = state(&app);
+                let ov = st.overlay.lock().unwrap();
+                ov.visible && ov.parked
+            };
+            if !parked {
+                return;
+            }
+            run_on_main(&app, follow_parked_game);
+        }
+    });
+}
+
+/// A parked panel: right above its game, hidden while the game is minimized, closed with it.
+fn follow_parked_game(app: &AppHandle) {
+    let Some(w) = panel(app) else { return };
+    let st = state(app);
+    let game = {
+        let ov = st.overlay.lock().unwrap();
+        if !ov.visible || !ov.parked {
+            return;
+        }
+        win32::hwnd(ov.game_hwnd)
+    };
+    if !win32::is_alive(game) {
+        debug!("the game window is gone: closing the panel");
+        hide_panel(app, false);
+        return;
+    }
+    let me = panel_hwnd(&w);
+    let shown = w.is_visible().unwrap_or(false);
+    if win32::is_minimized(game) {
+        if shown {
+            let _ = w.hide();
+        }
+        return;
+    }
+    if !shown {
+        win32::show_no_activate(me);
+    }
+    if !win32::place_above(me, game) {
+        // Can't sit right above it (e.g. the game runs as administrator): out of sight then.
+        let _ = w.hide();
+    }
 }
 
 /// The game is in front again: the panel is back over it, where it was (the game window may
@@ -360,8 +424,8 @@ fn unpark(app: &AppHandle) {
     };
     place(&st, &w, mode, game_hwnd);
     win32::show_no_activate(panel_hwnd(&w));
-    let _ = w.set_always_on_top(true);
-    debug!("game in front again: panel back");
+    win32::make_topmost(panel_hwnd(&w)); // directly: tao still thinks it is topmost
+    debug!("game in front again: panel on top again");
 }
 
 /// `give_focus_back`: activate the game (the user closed the panel), not when the focus is
@@ -396,6 +460,7 @@ pub fn keep_panel_on_top(app: &AppHandle) {
     };
     if shown && let Some(w) = panel(app) {
         let _ = w.set_always_on_top(true);
+        win32::make_topmost(panel_hwnd(&w));
     }
 }
 
