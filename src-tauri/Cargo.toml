@@ -1,12 +1,15 @@
 [package]
 name = "game-overlai"
-version = "0.1.0"
+# The app's version lives in web/package.json (tauri.conf.json and build.rs read it from there):
+# change it with `npm version <x.y.z>` in web/.
+version = "0.0.0"
 description = "AI assistant overlay for any game"
 edition = "2024"
 default-run = "game-overlai"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+serde_json = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -39,6 +42,7 @@ tauri-runtime = "=2.12.4"
 qrcode = { version = "0.15.0", default-features = false, features = ["svg"] }
 local-ip-address = "0.6.13"
 tauri-plugin-notification = "2.8.1"
+tauri-plugin-updater = "2.14.1"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg"] } # decode in tests

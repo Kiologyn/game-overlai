@@ -18,6 +18,7 @@ import type { PanelMode } from "./generated/PanelMode";
 import type { PermissionPrompt } from "./generated/PermissionPrompt";
 import type { ServerMsg } from "./generated/ServerMsg";
 import type { ToolInfo } from "./generated/ToolInfo";
+import type { UpdateStatus } from "./generated/UpdateStatus";
 import type { Usage } from "./generated/Usage";
 import type { Widget } from "./generated/Widget";
 
@@ -43,6 +44,8 @@ export interface UiState {
   lan: LanStatus | null;
   /** Settings page state; only this PC's UI gets it. */
   settings: Settings | null;
+  /** New versions; only this PC's UI gets it. */
+  update: UpdateStatus | null;
   /** Every game's widgets. */
   widgets: Widget[];
   /** The game whose widgets the widget layer shows (this PC's UI only); null: hidden. */
@@ -81,6 +84,7 @@ const initial: UiState = {
   widgetsShown: null,
   lan: null,
   settings: null,
+  update: null,
   overlay: { visible: false, mode: "compact", game: null, showSeq: 0, zoom: 1, zoomSeq: 0 },
 };
 
@@ -172,6 +176,8 @@ function reduce(s: UiState, msg: ServerMsg): UiState {
       return { ...s, lan: msg.status };
     case "settings":
       return { ...s, settings: msg.settings };
+    case "update":
+      return { ...s, update: msg.update };
     case "overlay.zoom":
       return { ...s, overlay: { ...s.overlay, zoom: msg.zoom, zoomSeq: s.overlay.zoomSeq + 1 } };
     case "overlay.hidden":

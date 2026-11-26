@@ -8,7 +8,7 @@ where node >nul 2>nul || goto :missing_node
 where npm >nul 2>nul || goto :missing_node
 where cargo >nul 2>nul || goto :missing_rust
 
-for /f "usebackq delims=" %%v in (`node -p "require('./src-tauri/tauri.conf.json').version"`) do set "VERSION=%%v"
+for /f "usebackq delims=" %%v in (`node -p "require('./web/package.json').version"`) do set "VERSION=%%v"
 if "%VERSION%"=="" goto :missing_version
 
 if not exist "web\node_modules\.bin\tauri.cmd" (
@@ -50,7 +50,7 @@ echo Rust is required. Install Rust with rustup and the MSVC C++ build tools, th
 goto :error
 
 :missing_version
-echo Could not read the version from src-tauri\tauri.conf.json.
+echo Could not read the version from web\package.json.
 goto :error
 
 :error

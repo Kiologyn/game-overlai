@@ -43,4 +43,8 @@ agentMaxHeight: number, lanPort: number, notifications: boolean,
 /**
  * The agent remembers the user's progress per game (`[memory] progress`).
  */
-progressMemory: boolean, };
+progressMemory: boolean, 
+/**
+ * Look for new versions at the start and every few hours (`[updates] auto_check`).
+ */
+updateCheck: boolean, };

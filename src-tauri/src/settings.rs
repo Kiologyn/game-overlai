@@ -28,7 +28,7 @@ pub fn snapshot(state: &AppState) -> ServerMsg {
             hotkeys_taken: state.failed_hotkeys.lock().unwrap().clone(),
             autostart,
             autostart_other,
-            version: env!("CARGO_PKG_VERSION").into(),
+            version: env!("APP_VERSION").into(),
             config_file: state.config_file.display().to_string(),
             data_dir: state.profiles_dir.parent().unwrap_or(&state.profiles_dir).display().to_string(),
             error: LAST_ERROR.lock().unwrap().clone(),
@@ -56,6 +56,7 @@ fn values_of(cfg: &Config) -> SettingsValues {
         lan_port: cfg.lan.port,
         notifications: cfg.notifications.enabled,
         progress_memory: cfg.memory.progress,
+        update_check: cfg.updates.auto_check,
     }
 }
 
@@ -107,6 +108,7 @@ fn apply(v: &SettingsValues, cfg: &mut Config) -> Result<(), String> {
     cfg.lan.port = v.lan_port;
     cfg.notifications.enabled = v.notifications;
     cfg.memory.progress = v.progress_memory;
+    cfg.updates.auto_check = v.update_check;
     Ok(())
 }
 

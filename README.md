@@ -29,8 +29,15 @@ the chat in a browser is at http://127.0.0.1:47823/.
 Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys (Ctrl+Alt by default: games
 almost never bind it; letters that type a character with AltGr in an installed keyboard layout are skipped;
 a game's page can give it its own combinations or turn some off while the game is in the foreground), agent (Claude Code or Codex),
-proxy, default panel size, frame size for the agent, phone port, notifications, start with Windows.
-Hotkeys and most values apply at once; the agent, proxy and ports after the restart the page offers.
+proxy, default panel size, frame size for the agent, phone port, notifications, start with Windows,
+checking for updates. Hotkeys and most values apply at once; the agent, proxy and ports after the restart the page offers.
+
+Updates: the app looks for a newer release on GitHub shortly after the start and every 6 hours (release
+builds; off in the settings), and by "Check for updates" next to the version at the bottom of the settings
+page. A new version is only offered — a button in the chat header (panel and browser; "Later" hides it until
+the next start), the version line in the settings and "Update to X" in the tray menu; "Update" downloads the
+installer, which closes the app, installs and starts it again. The portable exe (no `uninstall.exe` next to
+it) and dev builds open the release page instead.
 
 Game profiles: a game's name in the browser's chat list (or the game chip in the overlay) opens its page —
 its name for the agent, standing instructions (spoilers, character, language...), sites to search first,
@@ -64,6 +71,53 @@ phone takes the window in the foreground on the PC as the game (its frames come 
 every interface; "Сетевой интерфейс" on /phone picks the address in the QR code (automatic = a private
 address of a real adapter, the default route first; virtual/VPN ones are listed separately), kept in `lan.json`.
 
+## Releases
+
+The version lives in `web/package.json` only: `tauri.conf.json` points at it, `build.rs` passes it to the
+code as `APP_VERSION` (`Cargo.toml` keeps `0.0.0`). To release: `cd web; npm version 0.3.0
+--no-git-tag-version` (package.json + package-lock.json), commit and push it, then `git tag v0.3.0; git push
+origin v0.3.0`. The tag starts `.github/workflows/release.yml` on GitHub Actions (Windows runner):
+
+1. the tag must equal `v` + the version in `web/package.json`;
+2. web build, `tauri build` → the NSIS installer and the exe (the portable one);
+3. SignPath signs both (Authenticode), when set up — see below; otherwise they go out unsigned;
+4. the installer is signed for the updater (`tauri signer sign --app-version`, the key from the secrets) and
+   `latest.json` is written: version, link to the installer, its signature;
+5. `gh release create`: installer, portable exe, `.sig`, `latest.json`; notes generated from the commits.
+
+Installed copies read `releases/latest/download/latest.json` (`plugins.updater` in `tauri.conf.json`): GitHub
+serves it from the latest release, so a pre-release (`v0.3.0-beta.1`, marked as such) or a draft is not offered.
+The update is accepted only with a signature of our key for that very version (`requireSignedVersion`).
+`OVERLAI_UPDATE_URL=http://127.0.0.1:8000/latest.json` makes a dev build check that file instead (http
+works in debug builds only).
+
+Repository secrets (Settings → Secrets and variables → Actions):
+
+- `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the updater key (`tauri signer
+  generate`; its public half is `plugins.updater.pubkey`). Without them the workflow stops. Lost key = installed
+  copies can't take updates any more (only a manual reinstall with a new key): keep a backup.
+
+SignPath (free code signing for open source by SignPath Foundation; needs an OSI license in the repository,
+MFA on GitHub and SignPath, and the policy below published):
+
+1. apply at signpath.org; in SignPath add GitHub.com as a trusted build system for the project;
+2. artifact configuration: `.signpath/artifact-configuration.xml` (the uploaded zip with both exes);
+3. repository variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`
+   (e.g. `release-signing`), `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`, and the secret `SIGNPATH_API_TOKEN` (a CI user's
+   token). With `SIGNPATH_ORGANIZATION_ID` set the workflow submits the files and waits (up to an hour) for an
+   approver to approve the request in SignPath.
+
+### Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [Kiologyn](https://github.com/Kiologyn); approvers: [Kiologyn](https://github.com/Kiologyn).
+- Only builds of this repository made by its release workflow from a version tag are signed.
+- Privacy: the app sends data only where the user directs it: questions and game frames to the AI agent the
+  user chose (Claude Code or Codex, under the user's own account), the chat to the browser/phone the user
+  opened it on; it asks GitHub for the latest release to offer updates (can be turned off in the settings).
+
 ## Layout
 
 | Path | What |
@@ -81,6 +135,7 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
 | `src-tauri/src/protocol.rs` | WebSocket protocol; TS types are generated from it |
 | `src-tauri/src/proxy.rs`, `config.rs`, `tray.rs`, `hotkeys.rs` | network proxy, settings, tray, global hotkeys |
 | `src-tauri/src/settings.rs`, `notify.rs` | backend of the settings page, start with Windows; notifications |
+| `src-tauri/src/updates.rs`, `.github/workflows/release.yml` | new versions from GitHub Releases (Tauri updater); the release build |
 | `src-tauri/src/i18n.rs`, `web/src/i18n.ts`, `web/src/locales/` | interface languages: string codes → `<language>.json` (en, ru, es, zh, ja), shared by Rust and the UI |
 | `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/` = browser chat, `/phone`, `/settings` |
 | `spikes/` | phase 0 prototypes (ACP, capture, overlay), kept for reference |
@@ -113,6 +168,7 @@ address of a real adapter, the default route first; virtual/VPN ones are listed 
   0 = full; never over 2000 px a side); saved frames stay full size.
   `[lan] port = 47824` — port for phones (a free one if busy).
   `[memory] progress = true` — progress memory (the agent's tools for it and the notes in its prompt).
+  `[updates] auto_check = true` — look for a new version at the start and every 6 hours (through the same proxy).
 - History: `%LOCALAPPDATA%\game-overlai\history.db` (chats, game profiles, progress notes, widgets, panel places) + `shots\` (frames,
   deleted with their chat). `lan.json` there: phone access on/off and its token.
 - Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).

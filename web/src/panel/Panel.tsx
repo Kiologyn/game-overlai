@@ -117,6 +117,8 @@ export function Panel({ conn }: { conn: Connection }) {
                 usage={ui.usage}
                 agent={ui.agent}
                 onDragStart={startDrag}
+                update={ui.update}
+                send={(msg) => conn.send(msg)}
                 chats={ui.chats}
                 chatId={ui.chatId}
                 games={ui.games}

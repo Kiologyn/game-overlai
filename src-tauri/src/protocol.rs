@@ -464,6 +464,8 @@ pub struct SettingsValues {
     pub notifications: bool,
     /// The agent remembers the user's progress per game (`[memory] progress`).
     pub progress_memory: bool,
+    /// Look for new versions at the start and every few hours (`[updates] auto_check`).
+    pub update_check: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -496,6 +498,45 @@ pub struct Settings {
     pub data_dir: String,
     /// The last save was refused: why.
     pub error: Option<String>,
+}
+
+// ------------------------------------------------------------------ updates
+
+/// Where looking for a new version stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "state", rename_all = "camelCase")]
+#[ts(export)]
+pub enum UpdateState {
+    /// Not checked yet.
+    Idle,
+    Checking,
+    UpToDate,
+    /// A newer version is out (`UpdateStatus::version`).
+    Available,
+    /// Downloading it; `percent` once the size is known.
+    Downloading { percent: Option<u8> },
+    /// The installer starts: the app closes and comes back updated.
+    Installing,
+    /// The check or the update failed (the version found, if any, can be tried again).
+    Error { message: String },
+}
+
+/// New versions (this PC's UI only: only it can install).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UpdateStatus {
+    pub state: UpdateState,
+    /// This copy's version.
+    pub current: String,
+    /// The newer version found.
+    pub version: Option<String>,
+    /// Its release page ("What's new").
+    pub notes_url: Option<String>,
+    /// A copy without the installer (portable exe, dev build): "Update" opens the release page.
+    pub portable: bool,
+    /// "Later" in the chat header: its button hides until the next start or a newer version.
+    pub dismissed: bool,
 }
 
 // ------------------------------------------------------------------ messages
@@ -582,6 +623,15 @@ pub enum ClientMsg {
     /// Restart the app (applies agent/proxy/port changes).
     #[serde(rename = "app.restart")]
     AppRestart,
+    /// Look for a new version now (this PC's UI only, as the three below).
+    #[serde(rename = "update.check")]
+    UpdateCheck,
+    /// Download the version found and install it (the app restarts).
+    #[serde(rename = "update.install")]
+    UpdateInstall,
+    /// "Later": hide the chat header's update button until the next start.
+    #[serde(rename = "update.dismiss")]
+    UpdateDismiss,
     /// Open an http(s) link in the default browser (links must not navigate the overlay).
     #[serde(rename = "ui.openUrl")]
     UiOpenUrl { url: String },
@@ -695,6 +745,9 @@ pub enum ServerMsg {
     /// Settings page state (this PC's UI only).
     #[serde(rename = "settings")]
     Settings { settings: Box<Settings> },
+    /// New versions: on connect and on every change (this PC's UI only).
+    #[serde(rename = "update")]
+    Update { update: UpdateStatus },
 }
 
 #[cfg(test)]

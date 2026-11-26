@@ -23,6 +23,7 @@ pub struct Config {
     pub lan: LanConfig,
     pub notifications: NotificationsConfig,
     pub memory: MemoryConfig,
+    pub updates: UpdatesConfig,
     /// The user's model / effort choices per agent id: option id -> value, e.g.
     /// `[agent_options.claude] model = "sonnet"`, `effort = "high"`. Last: TOML tables follow values.
     pub agent_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
@@ -39,6 +40,20 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self { progress: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    /// Look for a new version on GitHub shortly after the start and every few hours (it is only
+    /// offered: installing waits for the user's click).
+    pub auto_check: bool,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self { auto_check: true }
     }
 }
 
@@ -145,6 +160,7 @@ impl Default for Config {
             lan: LanConfig::default(),
             notifications: NotificationsConfig::default(),
             memory: MemoryConfig::default(),
+            updates: UpdatesConfig::default(),
             agent_options: Default::default(),
         }
     }

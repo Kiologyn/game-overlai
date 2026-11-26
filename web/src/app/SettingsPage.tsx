@@ -1,9 +1,12 @@
 // /settings on this PC: language, hotkeys, agent, proxy, panel, frames, phone port,
-// notifications, starting with Windows. The core sends the settings to this PC's UI only.
+// notifications, starting with Windows, updates. The core sends the settings to this PC's UI only.
 
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Settings as SettingsIcon } from "lucide-react";
 import type { Connection } from "../api/connection";
+import type { ClientMsg } from "../api/generated/ClientMsg";
+import type { UpdateStatus } from "../api/generated/UpdateStatus";
+import { progressText } from "../components/UpdateButton";
 import { HotkeyInput, prettyHotkey } from "../components/HotkeyInput";
 import type { SettingsValues } from "../api/generated/SettingsValues";
 import { useUiState } from "../api/hooks";
@@ -273,6 +276,11 @@ export function SettingsPage({ conn }: { conn: Connection }) {
           {settings.autostartOther && (
             <p className="settings-warn">{t("autostart_other", { path: settings.autostartOther })}</p>
           )}
+          <label className="settings-check">
+            <input type="checkbox" checked={form.updateCheck} onChange={(e) => set("updateCheck", e.target.checked)} />
+            {t("update_auto_check")}
+          </label>
+          <p className="field-hint">{t("update_auto_check_hint")}</p>
         </section>
 
         <div className="game-form-actions settings-actions">
@@ -295,9 +303,49 @@ export function SettingsPage({ conn }: { conn: Connection }) {
         </div>
       </form>
 
+      <UpdateRow update={ui.update} send={(m) => conn.send(m)} />
       <p className="settings-about">
         game-overlai {settings.version} · {t("settings_about", { config: settings.configFile, data: settings.dataDir })}
       </p>
+    </div>
+  );
+}
+
+/** The version line's companion: check now, or the version found with its Update button. */
+function UpdateRow({ update, send }: { update: UpdateStatus | null; send(msg: ClientMsg): void }) {
+  const t = useT();
+  if (!update) return null;
+  const s = update.state;
+  const busy = s.state === "downloading" || s.state === "installing";
+  const found = update.version && s.state !== "upToDate" ? update.version : null;
+  return (
+    <div className="settings-update">
+      {found ? (
+        <>
+          <span>{t("update_available", { version: found })}</span>
+          {update.notesUrl && (
+            <a href={update.notesUrl} target="_blank" rel="noreferrer">
+              {t("update_whats_new")} ↗
+            </a>
+          )}
+          {busy ? (
+            <span>{progressText(update, t)}</span>
+          ) : (
+            <button type="button" className="btn primary" onClick={() => send({ type: "update.install" })}>
+              {update.portable ? t("update_download") : t("update_install")}
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <button type="button" className="btn" disabled={s.state === "checking"} onClick={() => send({ type: "update.check" })}>
+            {s.state === "checking" ? t("update_checking") : t("update_check")}
+          </button>
+          {s.state === "upToDate" && <span>{t("update_up_to_date")}</span>}
+        </>
+      )}
+      {s.state === "error" && <span className="settings-error">{s.message}</span>}
+      {found && update.portable && !busy && <p className="field-hint">{t("update_portable_hint")}</p>}
     </div>
   );
 }

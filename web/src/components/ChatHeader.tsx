@@ -5,6 +5,9 @@ import type { ChatSummary } from "../api/generated/ChatSummary";
 import type { GameProfile } from "../api/generated/GameProfile";
 import type { AgentStatus } from "../api/generated/AgentStatus";
 import type { Usage } from "../api/generated/Usage";
+import type { ClientMsg } from "../api/generated/ClientMsg";
+import type { UpdateStatus } from "../api/generated/UpdateStatus";
+import { UpdateButton } from "./UpdateButton";
 import { htmlLang, useT, type T } from "../i18n";
 
 function formatReset(unixSeconds: number | null, t: T): string {
@@ -64,10 +67,13 @@ interface HeaderProps {
   onDeleteChat(id: string): void;
   /** The mouse went down on the header (not on a control): move the panel. */
   onDragStart?: () => void;
+  /** New versions (the button shows only while one is found). */
+  update: UpdateStatus | null;
+  send(msg: ClientMsg): void;
 }
 
 export function ChatHeader(props: HeaderProps) {
-  const { title, usage, agent, chats, chatId, games, onNewChat, onOpenChat, onDeleteChat, onDragStart } = props;
+  const { title, usage, agent, chats, chatId, games, onNewChat, onOpenChat, onDeleteChat, onDragStart, update, send } = props;
   const t = useT();
   const [historyOpen, setHistoryOpen] = useState(false);
   return (
@@ -75,7 +81,7 @@ export function ChatHeader(props: HeaderProps) {
       className={`chat-header${onDragStart ? " draggable" : ""}`}
       onPointerDown={(e) => {
         if (!onDragStart || e.button !== 0) return;
-        if ((e.target as HTMLElement).closest("button, input, a, .overlay-history-menu")) return;
+        if ((e.target as HTMLElement).closest("button, input, a, .overlay-history-menu, .update-card")) return;
         e.preventDefault();
         onDragStart();
       }}
@@ -83,6 +89,7 @@ export function ChatHeader(props: HeaderProps) {
       <AgentDot agent={agent} />
       <span className="chat-title">{title ?? t("new_chat")}</span>
       <UsageBadge usage={usage} />
+      <UpdateButton update={update} send={send} />
       <div className="overlay-history">
         <button
           type="button"

@@ -10,7 +10,7 @@ use super::Ctx;
 use crate::protocol::{ClientKind, ClientMsg, ServerMsg};
 use crate::state::Target;
 use crate::history::ProfileEdit;
-use crate::{chat, games, lan, overlay, progress, settings, widgets};
+use crate::{chat, games, lan, overlay, progress, settings, updates, widgets};
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -34,7 +34,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
     let mut lan_generation = ctx.state.lan.generation();
 
     let mut initial = vec![
-        ServerMsg::Hello { version: env!("CARGO_PKG_VERSION").into(), client: kind },
+        ServerMsg::Hello { version: env!("APP_VERSION").into(), client: kind },
         ServerMsg::Language { language: crate::i18n::language() },
         chat::snapshot(&ctx.state),
         chat::chat_list(&ctx.state),
@@ -48,6 +48,7 @@ async fn session(socket: WebSocket, kind: ClientKind, ctx: Ctx) {
         initial.push(lan::status(&ctx.state));
         initial.push(settings::snapshot(&ctx.state));
         initial.push(widgets::shown_msg());
+        initial.push(updates::snapshot());
     }
     if let Some(usage) = ctx.state.usage.lock().unwrap().clone() {
         initial.push(ServerMsg::AgentUsage { usage });
@@ -186,6 +187,9 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str, capturing: &mut bool) {
         | ClientMsg::GameSetHotkeys { .. }
         | ClientMsg::SettingsResetPanelPlaces
         | ClientMsg::AppRestart
+        | ClientMsg::UpdateCheck
+        | ClientMsg::UpdateInstall
+        | ClientMsg::UpdateDismiss
         | ClientMsg::WidgetRects { .. }
             if ctx.lan =>
         {
@@ -210,6 +214,9 @@ fn handle(ctx: &Ctx, kind: ClientKind, text: &str, capturing: &mut bool) {
             info!("panel places forgotten");
         }
         ClientMsg::AppRestart => settings::restart(&ctx.state),
+        ClientMsg::UpdateCheck => updates::check_now(&ctx.app),
+        ClientMsg::UpdateInstall => updates::install(&ctx.app),
+        ClientMsg::UpdateDismiss => updates::dismiss(&ctx.app),
         ClientMsg::WidgetRects { rects } => widgets::set_rects(rects),
         ClientMsg::UiOpenUrl { url } => {
             if url.starts_with("https://") || url.starts_with("http://") {

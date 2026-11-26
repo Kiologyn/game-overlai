@@ -2183,3 +2183,111 @@ span.hotkey-input {
   background: linear-gradient(135deg, transparent 55%, var(--border-strong) 55%, var(--border-strong) 65%, transparent 65%, transparent 75%, var(--border-strong) 75%, var(--border-strong) 85%, transparent 85%);
   border-bottom-right-radius: 10px;
 }
+
+/* ------------------------------------------------------------------ updates */
+
+.update-btn {
+  position: relative;
+  flex: none;
+}
+
+.update-btn .icon-btn {
+  position: relative;
+  color: var(--text);
+}
+
+.update-btn .icon-btn.selected {
+  background: var(--surface-2);
+}
+
+.update-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.update-ring.spin {
+  animation: spin 900ms linear infinite;
+}
+
+.update-card {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  right: -64px; /* under the history and new chat buttons, inside the header */
+  width: min(280px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  font-size: 13px;
+}
+
+.topbar .update-card {
+  right: -34px; /* only the new chat button follows in the browser */
+}
+
+.update-card-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.update-card-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.update-card-note,
+.update-card-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.update-card-error {
+  color: var(--bad);
+  word-break: break-word;
+}
+
+.update-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--text);
+}
+
+.settings-update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.settings-update .settings-error {
+  flex-basis: 100%;
+}

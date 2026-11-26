@@ -8,6 +8,7 @@ import { blankProfile, findProfile, gameLabel, sameExe } from "../api/games";
 import { useUiState } from "../api/hooks";
 import { AgentDot, AgentNotice, UsageBadge } from "../components/ChatHeader";
 import { Composer } from "../components/Composer";
+import { UpdateButton } from "../components/UpdateButton";
 import { MessageList } from "../components/MessageList";
 import { ShotViewerProvider } from "../components/Shots";
 import { groupChats } from "../components/chatGroups";
@@ -81,6 +82,7 @@ export function App({ conn }: { conn: Connection }) {
           <span className="topbar-right">
             <UsageBadge usage={ui.usage} />
             <span className={`status ${ui.status}`}>{t(STATUS_TEXT[ui.status])}</span>
+            <UpdateButton update={ui.update} send={(msg) => conn.send(msg)} />
             <button
               type="button"
               className="icon-btn"

@@ -13,7 +13,7 @@ use crate::config::pretty_hotkey;
 use crate::hotkeys;
 use crate::lan;
 use crate::overlay::{self, ShowSource};
-use crate::protocol::{AgentState, PanelMode, Usage};
+use crate::protocol::{AgentState, PanelMode, UpdateState, UpdateStatus, Usage};
 use crate::state::AppState;
 
 pub const TRAY_ID: &str = "main";
@@ -29,6 +29,10 @@ struct Items {
     pause: CheckMenuItem<tauri::Wry>,
     settings: MenuItem<tauri::Wry>,
     quit: MenuItem<tauri::Wry>,
+    menu: Menu<tauri::Wry>,
+    /// "Update to X": in the menu only while a newer version is found.
+    update: MenuItem<tauri::Wry>,
+    update_shown: std::sync::atomic::AtomicBool,
 }
 
 static ITEMS: OnceLock<Items> = OnceLock::new();
@@ -52,6 +56,7 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
     let phone = MenuItem::with_id(app, "phone", tr!("tray_phone"), true, None::<&str>)?;
     let pause = CheckMenuItem::with_id(app, "pause", tr!("tray_pause"), true, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", tr!("tray_quit"), true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", "", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -80,6 +85,9 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
         pause: pause.clone(),
         settings: settings.clone(),
         quit: quit.clone(),
+        menu: menu.clone(),
+        update,
+        update_shown: Default::default(),
     });
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().cloned().expect("app icon"))
@@ -104,6 +112,7 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
                 let paused = pause_item.is_checked().unwrap_or(false);
                 hotkeys::set_paused(app, paused);
             }
+            "update" => crate::updates::install(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -197,11 +206,50 @@ pub fn refresh_menu(app: &AppHandle) {
             let _ = items.settings.set_text(tr!("tray_settings"));
             let _ = items.quit.set_text(tr!("tray_quit"));
         }
+        if let crate::protocol::ServerMsg::Update { update } = crate::updates::snapshot() {
+            show_update(&update);
+        }
         refresh_tooltip(&handle);
     });
 }
 
-fn open_url(app: &AppHandle, url: &str) {
+/// A new version found: "Update to X" above "Quit" (greyed while it downloads); none: no item.
+pub fn refresh_update(app: &AppHandle, status: &UpdateStatus) {
+    let status = status.clone();
+    let _ = app.run_on_main_thread(move || show_update(&status));
+}
+
+fn show_update(status: &UpdateStatus) {
+    use std::sync::atomic::Ordering;
+    let Some(items) = ITEMS.get() else { return };
+    let wanted = status.version.is_some() && !matches!(status.state, UpdateState::UpToDate);
+    if let Some(version) = &status.version {
+        let busy = matches!(status.state, UpdateState::Downloading { .. } | UpdateState::Installing);
+        let text = if busy {
+            tr!("tray_updating", version = version)
+        } else if status.portable {
+            tr!("tray_update_download", version = version)
+        } else {
+            tr!("tray_update", version = version)
+        };
+        let _ = items.update.set_text(text);
+        let _ = items.update.set_enabled(!busy);
+    }
+    if wanted != items.update_shown.swap(wanted, Ordering::SeqCst) {
+        let result = if wanted {
+            // Above the separator before "Quit".
+            let at = items.menu.items().map(|i| i.len().saturating_sub(2)).unwrap_or(0);
+            items.menu.insert(&items.update, at)
+        } else {
+            items.menu.remove(&items.update)
+        };
+        if let Err(e) = result {
+            warn!("tray: update item: {e}");
+        }
+    }
+}
+
+pub fn open_url(app: &AppHandle, url: &str) {
     if let Err(e) = app.opener().open_url(url, None::<&str>) {
         warn!("could not open {url}: {e}");
     }

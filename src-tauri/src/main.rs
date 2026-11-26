@@ -24,6 +24,7 @@ mod server;
 mod shots;
 mod state;
 mod tray;
+mod updates;
 mod widgets;
 
 use std::sync::Arc;
@@ -39,7 +40,7 @@ use crate::state::AppState;
 fn main() {
     let paths = paths::Paths::resolve();
     let _log_guard = logging::init(&paths.log_dir);
-    info!("game-overlai {} starting", env!("CARGO_PKG_VERSION"));
+    info!("game-overlai {} starting", env!("APP_VERSION"));
 
     let config = config::load(&paths.config_file);
     i18n::set_language(config.language);
@@ -95,6 +96,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(hotkeys::plugin())
         .manage(state.clone())
         .setup(move |app| {
@@ -111,6 +113,7 @@ fn main() {
             tray::build(app)?;
             lan::start_if_enabled(&state);
             notify::register_app_id();
+            updates::start(&handle);
             debug_show_on_start(&handle);
             let keys = state.cfg().hotkeys;
             info!("ready: {} = quick question, {} = chat, {} = focus game/panel", keys.quick, keys.chat, keys.focus);
