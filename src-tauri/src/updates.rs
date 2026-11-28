@@ -107,16 +107,17 @@ async fn check(app: &AppHandle, by_user: bool) {
         return;
     }
     let found = find(app).await;
-    // "Update" clicked meanwhile (on the version found before): the download goes on, this
-    // result is dropped.
-    if INNER.lock().unwrap().status.state != UpdateState::Checking {
-        return;
-    }
+    // "Update" clicked meanwhile (on the version found before): the download goes on, the
+    // result of this check is dropped (each change below looks under the lock).
+    let still = |i: &Inner| i.status.state == UpdateState::Checking;
     match found {
         Ok(Some(update)) => {
             info!("update: {} is out (this is {})", update.version, update.current_version);
             let version = update.version.clone();
             change(app, |i| {
+                if !still(i) {
+                    return;
+                }
                 // "Later" was for another version.
                 if i.status.version.as_deref() != Some(version.as_str()) {
                     i.status.dismissed = false;
@@ -130,6 +131,9 @@ async fn check(app: &AppHandle, by_user: bool) {
         Ok(None) => {
             info!("update: {} is the latest version", env!("APP_VERSION"));
             change(app, |i| {
+                if !still(i) {
+                    return;
+                }
                 i.status.state = UpdateState::UpToDate;
                 i.status.version = None;
                 i.status.notes_url = None;
@@ -139,6 +143,9 @@ async fn check(app: &AppHandle, by_user: bool) {
         Err(e) => {
             warn!("update check failed: {e}");
             change(app, |i| {
+                if !still(i) {
+                    return;
+                }
                 i.status.state = if i.found.is_some() && !by_user {
                     UpdateState::Available // a failed background check keeps what was found
                 } else {
