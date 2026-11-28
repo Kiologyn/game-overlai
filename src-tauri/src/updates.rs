@@ -21,7 +21,10 @@ pub const RELEASES_URL: &str = "https://github.com/Kiologyn/game-overlai/release
 /// The first automatic check waits for the start to settle (the agent, the game).
 const FIRST_CHECK: Duration = Duration::from_secs(20);
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// The check (a small JSON). reqwest counts the whole request, body included.
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// The download of the installer (a few MB, maybe through a slow proxy).
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 struct Inner {
     status: UpdateStatus,
@@ -86,15 +89,30 @@ pub fn check_now(app: &AppHandle) {
     tauri::async_runtime::spawn(async move { check(&app, true).await });
 }
 
+/// An update is being downloaded or installed: nothing else may start meanwhile.
+fn installing(state: &UpdateState) -> bool {
+    matches!(state, UpdateState::Downloading { .. } | UpdateState::Installing)
+}
+
 async fn check(app: &AppHandle, by_user: bool) {
-    {
-        let inner = INNER.lock().unwrap();
-        if matches!(inner.status.state, UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Installing) {
-            return;
+    // Checked and set under one lock: the automatic check and a click can't both start.
+    let mut started = false;
+    change(app, |i| {
+        if !installing(&i.status.state) && i.status.state != UpdateState::Checking {
+            i.status.state = UpdateState::Checking;
+            started = true;
         }
+    });
+    if !started {
+        return;
     }
-    change(app, |i| i.status.state = UpdateState::Checking);
-    match find(app).await {
+    let found = find(app).await;
+    // "Update" clicked meanwhile (on the version found before): the download goes on, this
+    // result is dropped.
+    if INNER.lock().unwrap().status.state != UpdateState::Checking {
+        return;
+    }
+    match found {
         Ok(Some(update)) => {
             info!("update: {} is out (this is {})", update.version, update.current_version);
             let version = update.version.clone();
@@ -141,7 +159,9 @@ async fn find(app: &AppHandle) -> anyhow::Result<Option<Update>> {
         builder = builder.endpoints(vec![url.parse()?])?;
     }
     builder = match proxy.url {
-        Some(url) => builder.proxy(url.parse()?),
+        Some(url) if url.starts_with("http://") || url.starts_with("https://") => builder.proxy(url.parse()?),
+        // The updater's HTTP client has no SOCKS: it takes the Windows proxy settings itself.
+        Some(_) => builder,
         None => builder.no_proxy(),
     };
     Ok(builder.build()?.check().await?)
@@ -150,21 +170,27 @@ async fn find(app: &AppHandle) -> anyhow::Result<Option<Update>> {
 /// "Update": downloads the installer, which closes the app, installs and starts it again.
 /// A copy without the installer opens the release page instead.
 pub fn install(app: &AppHandle) {
-    let (update, portable, page) = {
-        let inner = INNER.lock().unwrap();
-        if matches!(inner.status.state, UpdateState::Downloading { .. } | UpdateState::Installing) {
+    // Checked and set under one lock: a double click downloads once.
+    let mut job = None;
+    let mut page = None;
+    change(app, |i| {
+        if installing(&i.status.state) {
             return;
         }
-        let page = inner.status.notes_url.clone().unwrap_or_else(|| format!("{RELEASES_URL}/latest"));
-        (inner.found.clone(), inner.status.portable, page)
-    };
-    if portable {
+        if i.status.portable {
+            page = Some(i.status.notes_url.clone().unwrap_or_else(|| format!("{RELEASES_URL}/latest")));
+        } else if let Some(update) = i.found.clone() {
+            i.status.state = UpdateState::Downloading { percent: None };
+            job = Some(update);
+        }
+    });
+    if let Some(page) = page {
         info!("update: portable copy, opening {page}");
         crate::tray::open_url(app, &page);
         return;
     }
-    let Some(update) = update else { return };
-    change(app, |i| i.status.state = UpdateState::Downloading { percent: None });
+    let Some(mut update) = job else { return };
+    update.timeout = Some(DOWNLOAD_TIMEOUT);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut received: u64 = 0;

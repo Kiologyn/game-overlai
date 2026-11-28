@@ -84,6 +84,9 @@ origin v0.3.0`. The tag starts `.github/workflows/release.yml` on GitHub Actions
    `latest.json` is written: version, link to the installer, its signature;
 4. `gh release create`: installer, portable exe, `.sig`, `latest.json`; notes generated from the commits.
 
+A dry run of the same build: Actions → Release → Run workflow (or `gh workflow run release.yml --ref dev`);
+it publishes nothing and attaches the files to the run (without the key: no `.sig` / `latest.json`).
+
 Installed copies read `releases/latest/download/latest.json` (`plugins.updater` in `tauri.conf.json`): GitHub
 serves it from the latest release, so a pre-release (`v0.3.0-beta.1`, marked as such) or a draft is not offered.
 The update is accepted only with a signature of our key for that very version (`requireSignedVersion`).

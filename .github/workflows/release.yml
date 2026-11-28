@@ -1,15 +1,20 @@
 # A pushed tag v<version> (the version in web/package.json) builds the installer and the
-# portable exe, signs the installer for the in-app updater and publishes a GitHub release with latest.json, which installed copies read
-# to offer the update. A tag with a suffix (v0.3.0-beta.1) makes a pre-release: installed
-# copies don't see it.
+# portable exe, signs the installer for the in-app updater and publishes a GitHub release with
+# latest.json, which installed copies read to offer the update. A tag with a suffix
+# (v0.3.0-beta.1) makes a pre-release: installed copies don't see it.
 #
-# Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater key).
+# Run by hand (Actions → Release → Run workflow, or `gh workflow run release.yml --ref dev`):
+# a dry run of the same build that publishes nothing; the files are attached to the run.
+#
+# Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater key; a dry
+# run without them skips that signature).
 
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write # the release
@@ -20,6 +25,8 @@ concurrency:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      PUBLISH: ${{ github.event_name == 'push' }}
     defaults:
       run:
         shell: pwsh
@@ -31,14 +38,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           $version = (Get-Content web/package.json -Raw | ConvertFrom-Json).version
-          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+          if ($env:PUBLISH -eq "true" -and "v$version" -ne $env:GITHUB_REF_NAME) {
             throw "The tag $env:GITHUB_REF_NAME does not match the version $version in web/package.json"
           }
-          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+          $signed = [bool]$env:TAURI_SIGNING_PRIVATE_KEY
+          if (-not $signed -and $env:PUBLISH -eq "true") {
             throw "The secret TAURI_SIGNING_PRIVATE_KEY is missing: installed copies could not verify the update"
           }
+          if (-not $signed) { "::warning::No updater key: this dry run skips the updater signature and latest.json" }
           "VERSION=$version" >> $env:GITHUB_ENV
+          "TAG=v$version" >> $env:GITHUB_ENV
           "PRERELEASE=$($version.Contains('-'))" >> $env:GITHUB_ENV
+          "UPDATER_SIGNED=$signed" >> $env:GITHUB_ENV
 
       - uses: actions/setup-node@v7
         with:
@@ -56,7 +67,9 @@ jobs:
         working-directory: web
         run: |
           npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
           npm run build
+          if ($LASTEXITCODE -ne 0) { throw "the web build failed" }
 
       - name: Build game-overlai and its installer
         working-directory: src-tauri
@@ -69,8 +82,10 @@ jobs:
           New-Item -ItemType Directory out | Out-Null
           Copy-Item src-tauri/target/release/game-overlai.exe "out/game-overlai-$env:VERSION-portable.exe"
           Copy-Item "src-tauri/target/release/bundle/nsis/game-overlai_${env:VERSION}_x64-setup.exe" "out/game-overlai-$env:VERSION-setup.exe"
+          Get-ChildItem out | Format-Table Name, Length
 
       - name: Sign the installer for the updater, write latest.json
+        if: env.UPDATER_SIGNED == 'True'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -81,22 +96,31 @@ jobs:
           $base = "https://github.com/$env:GITHUB_REPOSITORY/releases"
           [ordered]@{
             version   = $env:VERSION
-            notes     = "$base/tag/$env:GITHUB_REF_NAME"
+            notes     = "$base/tag/$env:TAG"
             pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = (Get-Content "out/$setup.sig" -Raw).Trim()
-                url       = "$base/download/$env:GITHUB_REF_NAME/$setup"
+                url       = "$base/download/$env:TAG/$setup"
               }
             }
-          } | ConvertTo-Json -Depth 5 | Set-Content out/latest.json -Encoding utf8
+          } | ConvertTo-Json -Depth 5 | Set-Content out/latest.json -Encoding utf8NoBOM # serde rejects a BOM
           Get-Content out/latest.json
 
       - name: Publish the release
+        if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $flags = @("--title", "game-overlai $env:VERSION", "--generate-notes", "--verify-tag")
           if ($env:PRERELEASE -eq "True") { $flags += "--prerelease" }
-          gh release create $env:GITHUB_REF_NAME (Get-ChildItem out -File).FullName @flags
+          gh release create $env:TAG (Get-ChildItem out -File).FullName @flags
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+
+      - name: Attach the files to the run (dry run)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: game-overlai-${{ env.VERSION }}
+          path: out/
+          if-no-files-found: error
