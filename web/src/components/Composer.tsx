@@ -1,0 +1,111 @@
+import type { KeyboardEvent, RefObject } from "react";
+import { ArrowUp, Gamepad2, GripVertical, Square, X } from "lucide-react";
+import type { AgentOption } from "../api/generated/AgentOption";
+import type { GameInfo } from "../api/generated/GameInfo";
+import { ModelPicker } from "./ModelPicker";
+import { useT } from "../i18n";
+
+interface Props {
+  value: string;
+  onChange(value: string): void;
+  onSubmit(): void;
+  /** An answer is being generated: the send button becomes "stop". */
+  busy: boolean;
+  onStop(): void;
+  /** Overlay only: hide the panel. */
+  onClose?: () => void;
+  game: GameInfo | null;
+  /** Shown name of the game (the profile's name if the user gave one). */
+  gameName?: string;
+  /** Click on the game chip: open the game's profile. */
+  onOpenGame?: () => void;
+  agentName: string;
+  /** Model / effort choices of the agent. */
+  agentOptions: AgentOption[];
+  onSetAgentOption(id: string, value: string): void;
+  /** Overlay, compact panel: expand before the model menu opens. */
+  onBeforeModelMenu?: () => void;
+  placeholder: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
+  /** Overlay, compact panel: a grip to move the panel by. */
+  onDragStart?: () => void;
+}
+
+export function Composer(props: Props) {
+  const { value, onChange, onSubmit, busy, onStop, onClose, game, agentName } = props;
+  const t = useT();
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      if (!busy) onSubmit();
+    }
+  };
+
+  return (
+    <div className="composer">
+      {props.onDragStart && (
+        <span
+          className="drag-grip"
+          aria-label={t("drag_panel")}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            props.onDragStart?.();
+          }}
+        >
+          <GripVertical size={14} aria-hidden />
+        </span>
+      )}
+      {game && (() => {
+        const label = props.gameName || game.title || game.exe;
+        const content = (
+          <>
+            <Gamepad2 size={14} aria-hidden />
+            <span className="chip-text">{label}</span>
+          </>
+        );
+        const about = `${game.title}${game.exe ? ` (${game.exe})` : ""}`;
+        return props.onOpenGame && game.exe ? (
+          <button type="button" className="chip game clickable" onClick={props.onOpenGame} title={t("game_chip_title", { about })}>
+            {content}
+          </button>
+        ) : (
+          <span className="chip game" title={about}>
+            {content}
+          </span>
+        );
+      })()}
+      <input
+        ref={props.inputRef}
+        className="input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={props.placeholder}
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <ModelPicker
+        options={props.agentOptions}
+        agentName={agentName}
+        onSet={props.onSetAgentOption}
+        onBeforeOpen={props.onBeforeModelMenu}
+      />
+      {busy ? (
+        <button type="button" className="icon-btn send stop" onClick={onStop} title={t("stop_answer")}>
+          <Square size={12} fill="currentColor" />
+        </button>
+      ) : (
+        <button type="button" className="icon-btn send" onClick={onSubmit} disabled={!value.trim()} title={t("send_enter")}>
+          <ArrowUp size={16} />
+        </button>
+      )}
+      {onClose && (
+        <button type="button" className="icon-btn close" onClick={onClose} title={t("hide_esc")}>
+          <X size={16} />
+        </button>
+      )}
+    </div>
+  );
+}

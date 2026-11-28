@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- game-overlai: a chat bubble with a gamepad on a dark tile. Source of the icon set:
+       `npx tauri icon icons/icon.png` after rendering this file to a 1024 px PNG. -->
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="#161616" stroke="#3a3a3a" stroke-width="20"/>
+  <path d="M300 214 H724 A132 132 0 0 1 856 346 V598 A132 132 0 0 1 724 730 H468 L300 862 V730
+           A132 132 0 0 1 168 598 V346 A132 132 0 0 1 300 214 Z" fill="#ececec"/>
+  <g fill="#161616">
+    <rect x="276" y="430" width="200" height="72" rx="20"/>
+    <rect x="340" y="366" width="72" height="200" rx="20"/>
+    <circle cx="640" cy="414" r="50"/>
+    <circle cx="726" cy="510" r="50"/>
+  </g>
+</svg>

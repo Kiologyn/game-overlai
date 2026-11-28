@@ -38,6 +38,8 @@ spikes/*/out/
 logs/
 
 # --- Secrets / local config
+# The updater signing key (private key + password): only in the repository's Actions secrets
+/.tauri/
 .env
 .env.*
 !.env.example

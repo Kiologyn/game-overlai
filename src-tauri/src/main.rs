@@ -1,0 +1,161 @@
+// No console window in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+#[macro_use]
+mod i18n;
+mod agent;
+mod capture;
+mod chat;
+mod config;
+mod games;
+mod hotkeys;
+mod history;
+mod lan;
+mod notify;
+mod settings;
+mod logging;
+mod mcp;
+mod overlay;
+mod paths;
+mod progress;
+mod protocol;
+mod proxy;
+mod server;
+mod shots;
+mod state;
+mod tray;
+mod updates;
+mod widgets;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use tauri::RunEvent;
+use tracing::{error, info};
+
+use crate::overlay::ShowSource;
+use crate::protocol::PanelMode;
+use crate::state::AppState;
+
+fn main() {
+    let paths = paths::Paths::resolve();
+    let _log_guard = logging::init(&paths.log_dir);
+    info!("game-overlai {} starting", env!("APP_VERSION"));
+
+    let config = config::load(&paths.config_file);
+    i18n::set_language(config.language);
+    let (listener, port) = match server::bind(config.port) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("cannot start the UI server: {e}");
+            return;
+        }
+    };
+    // Dev: OVERLAI_UI_DEV=http://localhost:5173 loads the UI from Vite (hot reload).
+    let ui_base = std::env::var("OVERLAI_UI_DEV")
+        .ok()
+        .map(|s| s.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
+    // Our MCP server lives on the UI server; a fresh token per run keeps other programs out.
+    let mcp = agent::McpEndpoint {
+        name: mcp::SERVER_NAME,
+        url: format!("http://127.0.0.1:{port}/mcp"),
+        token: uuid::Uuid::new_v4().simple().to_string(),
+    };
+    // The agent starts right away (install on first run, then a warm process).
+    let (agent_events, agent_events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let spec = agent::spec::by_id(&config.agent);
+    if std::env::args().any(|a| a == "--autostart") {
+        info!("started with Windows");
+    }
+    let agent = agent::AgentHandle::start(
+        spec,
+        paths.agents_dir.clone(),
+        config.network.proxy.clone(),
+        config.network.requires_proxy(spec.id),
+        config.agent_options.get(spec.id).cloned().unwrap_or_default(),
+        Some(mcp.clone()),
+        agent_events,
+    );
+    let state = Arc::new(AppState::new(
+        config,
+        paths.config_file.clone(),
+        port,
+        ui_base,
+        paths.profiles_dir.clone(),
+        paths.history_dir.clone(),
+        agent,
+        mcp,
+    ));
+    chat::spawn_event_loop(state.clone(), agent_events_rx);
+
+    let app = tauri::Builder::default()
+        // Must be first: a second launch just opens the chat in the running instance.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            overlay::show(app, PanelMode::Expanded, ShowSource::Other);
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(hotkeys::plugin())
+        .manage(state.clone())
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            let _ = state.app.set(handle.clone());
+            tauri::async_runtime::spawn(server::run(listener, handle.clone(), state.clone()));
+            overlay::create(&handle, &state)?;
+            if let Err(e) = widgets::create_layer(&handle, &state) {
+                tracing::warn!("widget layer: {e}"); // the app works without widgets
+            }
+            *state.failed_hotkeys.lock().unwrap() = hotkeys::register(&handle);
+            // A game already in the foreground: its own hotkeys (if it has any).
+            hotkeys::follow_foreground(&handle, overlay::win32::foreground());
+            tray::build(app)?;
+            lan::start_if_enabled(&state);
+            notify::register_app_id();
+            updates::start(&handle);
+            debug_show_on_start(&handle);
+            let keys = state.cfg().hotkeys;
+            info!("ready: {} = quick question, {} = chat, {} = focus game/panel", keys.quick, keys.chat, keys.focus);
+            Ok(())
+        })
+        .build(tauri::generate_context!());
+
+    let app = match app {
+        Ok(app) => app,
+        Err(e) => {
+            error!("failed to start: {e}");
+            return;
+        }
+    };
+    app.run(|app, event| match event {
+        // The app lives in the tray: hidden windows must not end it. Only "Quit" (exit(0)) does.
+        RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
+        // An answer still streaming is saved as far as it got.
+        RunEvent::Exit => {
+            use tauri::Manager;
+            chat::flush(&app.state::<Arc<AppState>>());
+        }
+        _ => {}
+    });
+}
+
+/// OVERLAI_DEBUG_SHOW=compact|expanded opens the panel 1.5 s after start (for UI checks).
+fn debug_show_on_start(app: &tauri::AppHandle) {
+    let mode = match std::env::var("OVERLAI_DEBUG_SHOW").as_deref() {
+        Ok("compact") => PanelMode::Compact,
+        Ok("expanded") => PanelMode::Expanded,
+        _ => return,
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(1500));
+        overlay::run_on_main(&app, move |app| overlay::show(app, mode, ShowSource::Hotkey));
+        if std::env::var_os("OVERLAI_DEBUG_RESHOW").is_some() {
+            std::thread::sleep(Duration::from_millis(1000));
+            overlay::run_on_main(&app, overlay::hide);
+            std::thread::sleep(Duration::from_millis(1000));
+            overlay::run_on_main(&app, move |app| overlay::show(app, mode, ShowSource::Other));
+        }
+    });
+}
