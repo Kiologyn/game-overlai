@@ -94,7 +94,10 @@ Repository secrets (Settings → Secrets and variables → Actions):
 
 - `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the updater key (`tauri signer
   generate`; its public half is `plugins.updater.pubkey`). Without them the workflow stops. Lost key = installed
-  copies can't take updates any more (only a manual reinstall with a new key): keep a backup.
+  copies can't take updates any more (only a manual reinstall with a new key): keep a backup. The maintainer's
+  copy lives in `.tauri/` (git-ignored): `game-overlai-updater.key`, `.key.pub`, `.password`; to set the secrets:
+  `Get-Content .tauri\game-overlai-updater.key -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY`, the same for
+  `.password` → `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 ## Layout
 
