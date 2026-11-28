@@ -396,7 +396,7 @@ fn follow_parked_game(app: &AppHandle) {
     let shown = w.is_visible().unwrap_or(false);
     if win32::is_minimized(game) {
         if shown {
-            let _ = w.hide();
+            hide_window(&w);
         }
         return;
     }
@@ -405,15 +405,45 @@ fn follow_parked_game(app: &AppHandle) {
     }
     if !win32::place_above(me, game) {
         // Can't sit right above it (e.g. the game runs as administrator): out of sight then.
-        let _ = w.hide();
+        hide_window(&w);
     }
 }
+
+/// Hides the panel through tao and directly: after `show_no_activate` tao takes it for hidden
+/// already and would do nothing.
+fn hide_window(w: &WebviewWindow) {
+    let _ = w.hide();
+    win32::hide_now(panel_hwnd(w));
+}
+
+/// How long unpark waits for a game restored from the taskbar to leave its minimized state.
+const RESTORE_WAIT: Duration = Duration::from_millis(100);
+const RESTORE_TRIES: u32 = 20;
 
 /// The game is in front again: the panel is back over it, where it was (the game window may
 /// have moved meanwhile), without taking the focus from the game.
 fn unpark(app: &AppHandle) {
+    unpark_restored(app, 0);
+}
+
+/// Restored from the taskbar, the game comes to the front before its restore ends: until then
+/// its rectangle is not its own (the panel went to another monitor). Checked again a little
+/// later.
+fn unpark_restored(app: &AppHandle, tries: u32) {
     let Some(w) = panel(app) else { return };
     let st = state(app);
+    let game = win32::hwnd(st.overlay.lock().unwrap().game_hwnd);
+    if win32::is_alive(game) && win32::is_out_of_sight(game) {
+        // Still minimized after all the tries: it stays parked (its watcher follows the game).
+        if tries < RESTORE_TRIES {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(RESTORE_WAIT);
+                run_on_main(&app, move |app| unpark_restored(app, tries + 1));
+            });
+        }
+        return;
+    }
     let (mode, game_hwnd) = {
         let mut ov = st.overlay.lock().unwrap();
         if !ov.visible || !ov.parked {
@@ -440,7 +470,7 @@ fn hide_panel(app: &AppHandle, give_focus_back: bool) {
         ov.prefetch = None; // the next question is about a later moment
         ov.game_hwnd
     };
-    let _ = w.hide();
+    hide_window(&w);
     st.hub.send(Target::Overlay, ServerMsg::OverlayHidden);
 
     let game = win32::hwnd(game_hwnd);

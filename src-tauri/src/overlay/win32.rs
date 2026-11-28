@@ -7,7 +7,8 @@ use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAtt
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::Graphics::Gdi::{
     ScreenToClient,
-    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromWindow,
+    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MONITORINFO, MonitorFromPoint,
+    MonitorFromWindow,
 };
 use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentThreadId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -44,6 +45,13 @@ pub fn is_alive(h: HWND) -> bool {
 
 pub fn is_minimized(h: HWND) -> bool {
     unsafe { IsIconic(h).as_bool() }
+}
+
+/// Minimized, or not on any monitor yet: a window restored from the taskbar is activated while
+/// it still sits where minimized windows go (-32000), and the nearest monitor to that is not
+/// its own.
+pub fn is_out_of_sight(h: HWND) -> bool {
+    is_minimized(h) || unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONULL) }.is_invalid()
 }
 
 pub fn window_title(h: HWND) -> String {
@@ -192,11 +200,23 @@ pub fn place_above(panel: HWND, game: HWND) -> bool {
     }
 }
 
-/// Back into the topmost band, without activating it.
+/// Back into the topmost band, without activating it. SWP_NOOWNERZORDER: moved together with
+/// its (hidden, never topmost) owner, the panel stayed in the normal band after a park, under
+/// the game once the game came to the front.
 pub fn make_topmost(h: HWND) {
-    use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SetWindowPos,
+    };
     unsafe {
-        let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetWindowPos(
+            h,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        );
     }
 }
 
@@ -205,6 +225,15 @@ pub fn show_no_activate(h: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
     unsafe {
         let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+    }
+}
+
+/// Hides a window whatever tao thinks of it: after `show_no_activate` (past tao) tao still
+/// takes it for hidden, and its own hide does nothing.
+pub fn hide_now(h: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+    unsafe {
+        let _ = ShowWindow(h, SW_HIDE);
     }
 }
 
