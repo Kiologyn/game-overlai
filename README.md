@@ -1,109 +1,163 @@
 # game-overlai
 
-AI assistant overlay for any game on Windows. A hotkey opens a question field over the game; it
-expands into a chat panel that can see the game (a frame is attached to the question, and the agent
-can take one itself). The same chats open in a browser. The AI runs through a CLI agent the user is
-already signed in to (Claude Code; Codex support exists in code) over ACP — no API keys.
+Ask an AI about the game you're playing, right over the game. Press a hotkey, type a question, keep
+playing: the answer shows up in a small panel on top of the game. The AI can look at your screen, search
+the web, remember where you are in the game and pin notes over it. For Windows.
 
-## Getting started
+![The chat panel over a game: the agent looked at the screen, searched the game's wiki and answered with steps](docs/panel.png)
 
-Requirements: Windows 10/11, Rust (stable, MSVC), Node.js LTS + npm, WebView2 (built into Windows 11),
-Claude Code signed in (`claude`, then `/login`). `scripts\windows\setup.bat` checks and installs the
-tools via winget.
+*The panel over a game: the agent took a look at the screen, checked the wiki and answered. (The game is
+a mock-up made for these screenshots.)*
 
-```powershell
-scripts\windows\dev.bat      # Vite with hot reload + the app, in one console
-scripts\windows\build.bat    # installer (per user, no admin) + portable exe -> release\<version>\
-```
+It uses an AI you already have: **Claude Code** (a Claude subscription) or **Codex** (ChatGPT). You sign
+in to it once in a terminal; game-overlai needs no API keys and has no account of its own.
 
-By hand: `cd web; npm install; npm run build`, then `cd src-tauri; cargo run`. On first start the app
-installs the pinned ACP adapter of the agent into `%LOCALAPPDATA%\game-overlai\agents\`.
+## What you can do with it
 
-Using it: `Ctrl+Alt+Q` — quick question (starts a new chat), `Ctrl+Alt+W` — chat panel (the game's latest chat),
-`Ctrl+Alt+A` — keyboard focus between the game and the open panel (the panel stays), `Esc` / ✕ — hide. The panel belongs to the game window it was opened over: while another window is in front (the Start menu, another app) it stays drawn over the game behind that window (not over other apps; hidden while the game is minimized), and is on top again with the game. The panel moves by its header (grip in the compact field) and resizes by its
-edges, always inside the game window; its place is remembered per game. Ctrl + wheel / Ctrl +/− over the
-panel zoom it (content and window together, 50–200%, per game), Ctrl+0 — back to the default zoom. The agent looks at the game itself (`screenshot_game`) when a question
-needs the screen; its first frame after the hotkey is the one grabbed as the panel opened. The tray icon has the rest;
-the chat in a browser is at http://127.0.0.1:47823/.
+### Ask without leaving the game
 
-Settings: tray → "Настройки…" (http://127.0.0.1:47823/settings): hotkeys (Ctrl+Alt by default: games
-almost never bind it; letters that type a character with AltGr in an installed keyboard layout are skipped;
-a game's page can give it its own combinations or turn some off while the game is in the foreground), agent (Claude Code or Codex),
-proxy, default panel size, frame size for the agent, phone port, notifications, start with Windows,
-checking for updates. Hotkeys and most values apply at once; the agent, proxy and ports after the restart the page offers.
+`Ctrl+Alt+Q` opens a one-line question field over the game. Press Enter and it grows into the chat;
+`Esc` hides it again, and the game gets the keyboard back. `Ctrl+Alt+W` opens the game's latest chat
+instead of a new one.
 
-Updates: the app looks for a newer release on GitHub shortly after the start and every 6 hours (release
-builds; off in the settings), and by "Check for updates" next to the version at the bottom of the settings
-page. A new version is only offered — a button in the chat header (panel and browser; "Later" hides it until
-the next start), the version line in the settings and "Update to X" in the tray menu; "Update" downloads the
-installer, which closes the app, installs and starts it again. The portable exe (no `uninstall.exe` next to
-it) and dev builds open the release page instead.
+![The quick question field over the game, with a question typed in](docs/quick-question.png)
 
-Game profiles: a game's name in the browser's chat list (or the game chip in the overlay) opens its page —
-its name for the agent, standing instructions (spoilers, character, language...), sites to search first,
-and its chats. The agent gets the profile in the system prompt of a new session; a resumed
-session keeps its first system prompt (Claude Code), so a changed profile is sent with the next question.
+The panel stays with the game it was opened over. Move it by its header, resize it by its edges and zoom it
+with `Ctrl` + mouse wheel: the place and the size are remembered for each game.
 
-Progress memory (settings → Agent, on by default): the agent saves lasting facts about the user's
-progress per game (chapter, build, bosses beaten) with MCP tools, and every chat of that game gets
-them in its prompt. The game's page lists them ("Прогресс") to fix, add or delete.
+### Let it look at the screen
 
-Agent tools (our MCP server): `screenshot_game`; `zoom_screen` — a region of the last screenshot at
-full resolution (small text); `watch_screen` — waits (≤ 50 s) until the screen changes or settles and
-returns a fresh frame; `progress_add/_update/_remove` (only while memory is on); `widget_list/_create/
-_update/_delete`.
+Ask "what is this?" and the agent takes a picture of the game itself. It can also zoom into a part of the
+last picture to read small text, or wait until something on the screen changes (a loading screen ends,
+a dialog shows up). The pictures stay in the chat, so you can see what it was looking at.
 
-Widgets: cards the agent pins over a game's window (title, short Markdown, a checklist the user ticks,
-a countdown, and hidden JSON `data` the agent keeps progress in), kept per game. They show whenever that
-game is in the foreground, in one transparent topmost window over it that never takes the focus and
-lets clicks through outside the cards. A card moves by its title bar (stays inside the game window,
-snaps to its edges, place kept as a fraction of the window), its width changes by the bottom-right
-corner, the corner button makes it 50% see-through, the chevron folds it. The game's page lists and
-deletes them. `/widgets?exe=<game.exe>` previews a game's widgets in a browser tab (the layer itself is
-out of screenshots, like the panel, unless captures are allowed in the settings).
+### Pin notes over the game
 
-Phone: tray → "Доступ с телефона (Wi-Fi)" turns on a second server for the local network (port 47824,
-off by default) and opens http://127.0.0.1:47823/phone with the QR code. The QR link carries an access
-token once and leaves a cookie (SameSite=Lax: QR scanners open the link from their own site); without
-it the LAN server answers 401. It serves the browser chat only
-(no MCP, no overlay or access controls); "Сбросить доступ" signs every device out. A question from the
-phone takes the window in the foreground on the PC as the game (its frames come from it). The server listens on
-every interface; "Сетевой интерфейс" on /phone picks the address in the QR code (automatic = a private
-address of a real adapter, the default route first; virtual/VPN ones are listed separately), kept in `lan.json`.
+The agent can pin small cards over the game window: a checklist you tick, a countdown, a short note. They
+show whenever that game is in front, never take the keyboard (clicks outside them go to the game), and
+stay where you drag them.
+A corner button makes a card see-through, and the arrow folds it.
 
-## Releases
+![Two cards over the game: a checklist of quest items and a countdown](docs/widgets.png)
 
-The version lives in `web/package.json` only: `tauri.conf.json` points at it, `build.rs` passes it to the
-code as `APP_VERSION` (`Cargo.toml` keeps `0.0.0`). To release: `cd web; npm version 0.3.0
---no-git-tag-version` (package.json + package-lock.json), commit and push it, then `git tag v0.3.0; git push
-origin v0.3.0`. The tag starts `.github/workflows/release.yml` on GitHub Actions (Windows runner):
+### Tell it about the game once
 
-1. the tag must equal `v` + the version in `web/package.json`;
-2. web build, `tauri build` → the NSIS installer and the exe (the portable one);
-3. the installer is signed for the updater (`tauri signer sign --app-version`, the key from the secrets) and
-   `latest.json` is written: version, link to the installer, its signature;
-4. `gh release create`: installer, portable exe, `.sig`, `latest.json`; notes generated from the commits.
+Each game has a page (click the game's name in the chat or in the browser's chat list): what to call it, what you want from the agent ("no spoilers", "I play a mage",
+"answer in Spanish") and which sites to search first. While you play, the agent notes your progress
+(chapter, build, bosses beaten), so you don't have to explain it again in every new chat. You can fix
+or delete any note.
 
-A dry run of the same build: Actions → Release → Run workflow (or `gh workflow run release.yml --ref dev`);
-it publishes nothing and attaches the files to the run (without the key: no `.sig` / `latest.json`). GitHub
-offers manual runs only once the workflow file is on the default branch (`main`).
+![A game's page: name, instructions for the agent, sites to search, and the progress it remembers](docs/game-profile.png)
 
-Installed copies read `releases/latest/download/latest.json` (`plugins.updater` in `tauri.conf.json`): GitHub
-serves it from the latest release, so a pre-release (`v0.3.0-beta.1`, marked as such) or a draft is not offered.
-The update is accepted only with a signature of our key for that very version (`requireSignedVersion`).
-`OVERLAI_UPDATE_URL=http://127.0.0.1:8000/latest.json` makes a dev build check that file instead (http
-works in debug builds only).
+### Keep the chats in a browser and on your phone
 
-Repository secrets (Settings → Secrets and variables → Actions):
+All chats are also at http://127.0.0.1:47823/ in any browser, sorted by game and searchable. Handy on a
+second monitor, or to read a long answer in full.
 
-- `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the updater key (`tauri signer
-  generate`; its public half is `plugins.updater.pubkey`). Without them the workflow stops. Lost key = installed
-  copies can't take updates any more (only a manual reinstall with a new key): keep a backup. The maintainer's
-  copy lives in `.tauri/` (git-ignored): `game-overlai-updater.key`, `.key.pub`, `.password`; to set the secrets:
-  `Get-Content .tauri\game-overlai-updater.key -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY`, the same for
-  `.password` → `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+![The chat history in a browser, grouped by game](docs/browser.png)
 
-## Layout
+<img src="docs/phone.png" alt="The same chat on a phone" width="240" align="right">
+
+**On your phone:** tray icon → *Access from phone (Wi-Fi)*, then scan the QR code with the phone's camera.
+The phone opens the same chats over your home network, so you can ask a question without touching
+the game at all; the agent looks at whatever is in front on the PC.
+
+Phone access is off until you turn it on. The QR code carries a one-time key, and devices without it
+can't connect. *Reset access* on the QR page signs every phone out.
+
+<br clear="right">
+
+## Install
+
+1. Install [Node.js](https://nodejs.org/) (the LTS version). The AI connectors run on it.
+2. Sign in to your AI in a terminal, once:
+   - **Claude Code:** install it from [claude.com/claude-code](https://claude.com/claude-code), run `claude`, then `/login`;
+   - or **Codex:** install it from [github.com/openai/codex](https://github.com/openai/codex) and run `codex login`
+     (then choose Codex in the settings).
+3. Download `game-overlai-<version>-setup.exe` from
+   [Releases](https://github.com/Kiologyn/game-overlai/releases/latest) and run it. It installs for your
+   user only, without admin rights.
+
+   The app isn't code-signed yet, so Windows may show "Windows protected your PC": press *More info* →
+   *Run anyway*.
+4. game-overlai starts in the tray. The first start takes a minute: it sets up the connector to your AI.
+
+`game-overlai-<version>-portable.exe` runs without installing, but doesn't update itself: it tells you
+when a new version is out and opens the download page.
+
+## Keys
+
+| Keys | What they do |
+| --- | --- |
+| `Ctrl+Alt+Q` | Quick question: a new chat |
+| `Ctrl+Alt+W` | The chat panel with the game's latest chat |
+| `Ctrl+Alt+A` | Moves the keyboard between the game and the open panel |
+| `Esc` | Hides the panel |
+| `Ctrl` + wheel, `Ctrl +` / `Ctrl −` | Zoom the panel (`Ctrl+0` resets it) |
+
+Hotkeys are changed in the settings, for all games or for one game on its page (or turned off there). The
+defaults use `Ctrl+Alt` because games almost never do. *Pause hotkeys* in the tray menu frees them for a while.
+
+## Settings
+
+Tray icon → *Settings…*: language, hotkeys, which AI and how it connects (proxy), panel size, picture
+quality for the agent, notifications, starting with Windows and updates.
+
+<img src="docs/settings.png" alt="The settings page: language, hotkeys, agent" width="520">
+
+The model and its effort are picked next to the send button, from what your AI offers.
+
+## Good to know
+
+- **Borderless or windowed games work best.** A game in exclusive fullscreen may minimize itself when the
+  panel takes the keyboard. The agent's first picture is the one taken the moment you pressed the hotkey,
+  before the panel opened, so it still shows the game.
+- **Nothing is injected into the game.** The panel is an ordinary window on top, and pictures come from
+  Windows' own screen capture: no hooks, no DLLs.
+- **The panel and the cards stay out of screenshots, recordings and streams,** so they don't end up in your
+  clips (*Settings* can allow it).
+- **Pictures go to your AI only when the agent takes them,** when a question needs the screen. Chats,
+  pictures and notes are stored on your PC.
+- **Answers while the panel is hidden:** a Windows notification tells you when an answer is ready or the
+  agent asks for permission.
+- **Usage:** the tray menu shows how much of your Claude Code limit is used.
+- **Updates:** the app checks GitHub for a new version and only offers it: a button in the chat header,
+  a line in the settings and an item in the tray menu. Updating restarts the app.
+- **Your data:** chats and pictures are in `%LOCALAPPDATA%\game-overlai`, settings in
+  `%APPDATA%\game-overlai\config.toml`. Uninstalling keeps both.
+
+## Requirements
+
+- Windows 10 or 11, 64-bit, with WebView2 (built into Windows 11; Windows 10 usually has it too)
+- Node.js LTS
+- Claude Code or Codex, signed in
+
+---
+
+## For developers
+
+### How it's built
+
+A Rust core (Tauri 2) and a React UI. The core shows the overlay windows, grabs game frames with Windows
+Graphics Capture, keeps the history in SQLite and serves the UI over HTTP + WebSocket on
+`127.0.0.1:47823`; the panel, the cards, the browser tabs and phones all run the same web app. The AI is
+a CLI agent started over [ACP](https://agentclientprotocol.com/) (Claude Code / Codex adapters, a pinned
+npm version installed into the app's folder); the agent's game tools (screenshot, zoom, watch, progress
+notes, cards) come from the core's own MCP server.
+
+### Building from source
+
+| | |
+| --- | --- |
+| Install Rust, Node.js and the rest (winget) | `scripts\windows\setup.bat` |
+| Run with hot reload (Vite + the app) | `scripts\windows\dev.bat` |
+| Build the installer + portable exe into `release\<version>\` | `scripts\windows\build.bat` |
+
+By hand: `cd web; npm install; npm run build`, then `cd src-tauri; cargo run`.
+
+Before committing: `cargo test` and `cargo clippy` (no warnings) in `src-tauri/`, `npm run build` in `web/`.
+
+### Layout
 
 | Path | What |
 |---|---|
@@ -112,52 +166,85 @@ Repository secrets (Settings → Secrets and variables → Actions):
 | `src-tauri/src/agent/` | agents over ACP: adapter install, supervision, sessions, permissions; `spec.rs` = per-agent settings |
 | `src-tauri/src/chat.rs`, `history.rs` | current chat ↔ agent session, system prompt; chat history in SQLite, frames on disk |
 | `src-tauri/src/games.rs`, `progress.rs` | game profiles (per exe): name, instructions, sources; progress memory |
-| `src-tauri/src/widgets.rs` | widgets per game and the transparent layer window over the game (click-through outside cards) |
+| `src-tauri/src/widgets.rs` | cards per game and the transparent layer window over the game (click-through outside cards) |
 | `src-tauri/src/capture/`, `shots.rs` | game frames: Windows Graphics Capture, JPEG encoding, storage; `look.rs` = zoom crops, change detection |
-| `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): frames, progress memory, widgets |
+| `src-tauri/src/mcp.rs` | MCP server for the agent (`/mcp`, bearer token): frames, progress memory, cards |
 | `src-tauri/src/server/` | HTTP + WebSocket servers the UI talks to: local (127.0.0.1) and LAN (token) |
 | `src-tauri/src/lan.rs` | phone access: on/off, token, addresses, QR codes |
 | `src-tauri/src/protocol.rs` | WebSocket protocol; TS types are generated from it |
 | `src-tauri/src/proxy.rs`, `config.rs`, `tray.rs`, `hotkeys.rs` | network proxy, settings, tray, global hotkeys |
 | `src-tauri/src/settings.rs`, `notify.rs` | backend of the settings page, start with Windows; notifications |
 | `src-tauri/src/updates.rs`, `.github/workflows/release.yml` | new versions from GitHub Releases (Tauri updater); the release build |
-| `src-tauri/src/i18n.rs`, `web/src/i18n.ts`, `web/src/locales/` | interface languages: string codes → `<language>.json` (en, ru, es, zh, ja), shared by Rust and the UI |
-| `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/` = browser chat, `/phone`, `/settings` |
+| `src-tauri/src/i18n.rs`, `web/src/i18n.ts`, `web/src/locales/` | interface languages (en, ru, es, zh, ja), shared by Rust and the UI |
+| `web/` | UI (Vite + React + TS): `/panel` = overlay panel, `/widgets` = cards, `/` = browser chat, `/phone`, `/settings` |
 | `spikes/` | phase 0 prototypes (ACP, capture, overlay), kept for reference |
 
-## Conventions
+### Conventions
 
-- After changing `protocol.rs`, run `cargo test` in `src-tauri/`: it regenerates
-  `web/src/api/generated/` (don't edit those files).
-- Before committing: `cargo test`, `cargo clippy` (no warnings) in `src-tauri/`, `npm run build` in `web/`.
+- After changing `protocol.rs`, run `cargo test` in `src-tauri/`: it regenerates `web/src/api/generated/`
+  (don't edit those files).
 - No DLL injection or hooks into game processes (anti-cheat): the overlay is a separate topmost window,
   frames come from Windows Graphics Capture.
 - UI: neutral dark theme, no blue.
-- UI text: never inline. Use a string code — `t("code")` (`useT()`) in the UI, `tr!("code", name = value)` in
-  Rust — and add it to every `web/src/locales/*.json` (English is the base; `{name}` placeholders). `cargo test`
-  checks that every used code exists and every language has every string with the same placeholders.
-  Logs and the agent's system prompt stay in English.
+- UI text is never inline: `t("code")` (`useT()`) in the UI, `tr!("code", name = value)` in Rust, and the
+  code goes into every `web/src/locales/*.json` (English is the base; `{name}` placeholders). `cargo test`
+  checks that every used code exists and every language has it with the same placeholders. Logs and the
+  agent's system prompt stay in English.
 
-## Runtime files
+### Releases
 
-- Settings: `%APPDATA%\game-overlai\config.toml` (created on first run; missing keys = defaults; the settings
-  page rewrites it). `agent = "claude"` or `"codex"`; `[notifications] enabled` — a Windows notification when
-  an answer to a question from the overlay is ready (or the agent asks for a permission) while the panel is
-  hidden. `language = "ru"` — interface language (en, ru, es, zh, ja; default: the Windows one if the app
-  has it, else English); the settings page switches it at once, for every UI, the tray and notifications. Start with Windows = the `game-overlai` value under `HKCU\...\CurrentVersion\Run`.
-  `[network] proxy = "system"` takes the Windows proxy (incl. PAC), else HTTP(S)_PROXY, else direct;
+The version lives only in `web/package.json`: `tauri.conf.json` points at it, and `build.rs` passes it to
+the code as `APP_VERSION` (`Cargo.toml` keeps `0.0.0`). To release:
+
+```powershell
+cd web; npm version 0.3.0 --no-git-tag-version   # package.json + package-lock.json
+# commit and push, then:
+git tag v0.3.0; git push origin v0.3.0
+```
+
+The tag starts `.github/workflows/release.yml` (Windows runner). It checks that the tag is `v` + the
+version, builds the NSIS installer and the portable exe, signs the installer for the updater and writes
+`latest.json`, then publishes a release with notes generated from the commits. A tag with a suffix
+(`v0.3.0-beta.1`) makes a pre-release, which installed copies don't see.
+
+A dry run of the same build publishes nothing and attaches the files to the run: *Actions → Release → Run
+workflow*, or `gh workflow run release.yml --ref dev`. GitHub offers it once the workflow file is on `main`.
+
+**The updater key.** Installed copies read `releases/latest/download/latest.json` and accept an installer
+only with a signature of our key for that very version (`requireSignedVersion`). The key goes into the
+repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (its public half is
+`plugins.updater.pubkey`); without them a release stops. The maintainer's copy is in the git-ignored
+`.tauri/`:
+
+```powershell
+Get-Content .tauri\game-overlai-updater.key -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY
+Get-Content .tauri\game-overlai-updater.password -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+Keep a backup: with the key lost, installed copies can't take updates any more, only a manual reinstall.
+
+### Settings file
+
+`%APPDATA%\game-overlai\config.toml` is created on the first start; a missing key means its default, and
+the settings page rewrites the file. A few keys worth knowing:
+
+- `[network] proxy = "system"` takes the Windows proxy (PAC included), else `HTTP(S)_PROXY`, else none;
   `require_proxy_for = ["claude"]` refuses to start that agent without a proxy.
-  `[agent_options.<agent>]` — the model / effort picked in the input row (button left of ↑), applied to
-  every session of that agent; the choices are whatever the agent offers (ACP session config options).
-  `[capture] agent_max_height = 720` — frames go to the agent scaled to this height (aspect kept,
-  0 = full; never over 2000 px a side); saved frames stay full size.
-  `[lan] port = 47824` — port for phones (a free one if busy).
-  `[memory] progress = true` — progress memory (the agent's tools for it and the notes in its prompt).
-  `[updates] auto_check = true` — look for a new version at the start and every 6 hours (through the same proxy).
-- History: `%LOCALAPPDATA%\game-overlai\history.db` (chats, game profiles, progress notes, widgets, panel places) + `shots\` (frames,
-  deleted with their chat). `lan.json` there: phone access on/off and its token.
-- Logs: `%LOCALAPPDATA%\game-overlai\logs\` (`OVERLAI_LOG=debug` for more).
+- `[agent_options.<agent>]`: the model and effort picked in the chat, for every session of that agent.
+- `[capture] agent_max_height = 720`: pictures go to the agent scaled to this height (0 = full size, never
+  over 2000 px a side); saved ones stay full size.
 
-Debug switches: `OVERLAI_UI_DEV=http://localhost:5173` (UI from Vite), `OVERLAI_DEBUG_SHOW=compact|expanded`
-(open the panel on start), `OVERLAI_DEBUG_CAPTURABLE=1` (panel visible in screenshots, like the setting),
-`OVERLAI_LAN_ADDR=127.0.0.1` (phone server on this PC only: tests without the firewall prompt).
+In `%LOCALAPPDATA%\game-overlai\`: `history.db` (chats, game pages, progress notes, cards, panel places),
+`shots\` (pictures, deleted with their chat), `lan.json` (phone access and its key), `agents\` (the ACP
+adapters), `logs\`.
+
+### Debug switches
+
+| Variable | Effect |
+| --- | --- |
+| `OVERLAI_LOG=debug` | more detailed logs |
+| `OVERLAI_UI_DEV=http://localhost:5173` | the UI from Vite (what `dev.bat` does) |
+| `OVERLAI_DEBUG_SHOW=compact\|expanded` | opens the panel 1.5 s after the start |
+| `OVERLAI_DEBUG_CAPTURABLE=1` | the panel shows up in screenshots |
+| `OVERLAI_LAN_ADDR=127.0.0.1` | the phone server on this PC only (tests without the firewall prompt) |
+| `OVERLAI_UPDATE_URL=http://127.0.0.1:8000/latest.json` | checks that file instead of the GitHub release (http: debug builds only) |
