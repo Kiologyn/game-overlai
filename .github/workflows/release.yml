@@ -1,13 +1,9 @@
 # A pushed tag v<version> (the version in web/package.json) builds the installer and the
-# portable exe, has them signed by SignPath (once it is set up), signs the installer for the
-# in-app updater and publishes a GitHub release with latest.json, which installed copies read
+# portable exe, signs the installer for the in-app updater and publishes a GitHub release with latest.json, which installed copies read
 # to offer the update. A tag with a suffix (v0.3.0-beta.1) makes a pre-release: installed
 # copies don't see it.
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater key).
-# SignPath (optional, see README "Releases"): variables SIGNPATH_ORGANIZATION_ID,
-# SIGNPATH_PROJECT_SLUG, SIGNPATH_SIGNING_POLICY_SLUG, SIGNPATH_ARTIFACT_CONFIGURATION_SLUG
-# and the secret SIGNPATH_API_TOKEN; without SIGNPATH_ORGANIZATION_ID the files go out unsigned.
 
 name: Release
 
@@ -17,7 +13,6 @@ on:
 
 permissions:
   contents: write # the release
-  actions: read # SignPath reads this run's artifact
 
 concurrency:
   group: release-${{ github.ref }}
@@ -25,8 +20,6 @@ concurrency:
 jobs:
   release:
     runs-on: windows-latest
-    env:
-      SIGNPATH: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
     defaults:
       run:
         shell: pwsh
@@ -77,39 +70,6 @@ jobs:
           Copy-Item src-tauri/target/release/game-overlai.exe "out/game-overlai-$env:VERSION-portable.exe"
           Copy-Item "src-tauri/target/release/bundle/nsis/game-overlai_${env:VERSION}_x64-setup.exe" "out/game-overlai-$env:VERSION-setup.exe"
 
-      - name: Upload the files for signing
-        id: unsigned
-        if: env.SIGNPATH == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: unsigned
-          path: out/*.exe
-          if-no-files-found: error
-
-      - name: Sign with SignPath
-        if: env.SIGNPATH == 'true'
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          # The release signing policy waits for a person to approve the request in SignPath.
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed
-
-      - name: Take the signed files
-        if: env.SIGNPATH == 'true'
-        run: |
-          foreach ($name in "game-overlai-$env:VERSION-setup.exe", "game-overlai-$env:VERSION-portable.exe") {
-            $file = "signed/$name"
-            if ((Get-AuthenticodeSignature $file).Status -ne "Valid") { throw "$name came back without a valid signature" }
-            Copy-Item $file "out/$name" -Force
-          }
-
-      # After SignPath: its signature changes the file, and the updater checks the final bytes.
       - name: Sign the installer for the updater, write latest.json
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -137,9 +97,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $flags = @("--title", "game-overlai $env:VERSION", "--generate-notes", "--verify-tag")
-          if ($env:SIGNPATH -eq "true") {
-            $flags += "--notes", "Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)."
-          }
           if ($env:PRERELEASE -eq "True") { $flags += "--prerelease" }
           gh release create $env:GITHUB_REF_NAME (Get-ChildItem out -File).FullName @flags
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }

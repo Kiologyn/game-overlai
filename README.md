@@ -80,10 +80,9 @@ origin v0.3.0`. The tag starts `.github/workflows/release.yml` on GitHub Actions
 
 1. the tag must equal `v` + the version in `web/package.json`;
 2. web build, `tauri build` → the NSIS installer and the exe (the portable one);
-3. SignPath signs both (Authenticode), when set up — see below; otherwise they go out unsigned;
-4. the installer is signed for the updater (`tauri signer sign --app-version`, the key from the secrets) and
+3. the installer is signed for the updater (`tauri signer sign --app-version`, the key from the secrets) and
    `latest.json` is written: version, link to the installer, its signature;
-5. `gh release create`: installer, portable exe, `.sig`, `latest.json`; notes generated from the commits.
+4. `gh release create`: installer, portable exe, `.sig`, `latest.json`; notes generated from the commits.
 
 Installed copies read `releases/latest/download/latest.json` (`plugins.updater` in `tauri.conf.json`): GitHub
 serves it from the latest release, so a pre-release (`v0.3.0-beta.1`, marked as such) or a draft is not offered.
@@ -96,27 +95,6 @@ Repository secrets (Settings → Secrets and variables → Actions):
 - `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the updater key (`tauri signer
   generate`; its public half is `plugins.updater.pubkey`). Without them the workflow stops. Lost key = installed
   copies can't take updates any more (only a manual reinstall with a new key): keep a backup.
-
-SignPath (free code signing for open source by SignPath Foundation; needs an OSI license in the repository,
-MFA on GitHub and SignPath, and the policy below published):
-
-1. apply at signpath.org; in SignPath add GitHub.com as a trusted build system for the project;
-2. artifact configuration: `.signpath/artifact-configuration.xml` (the uploaded zip with both exes);
-3. repository variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`
-   (e.g. `release-signing`), `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`, and the secret `SIGNPATH_API_TOKEN` (a CI user's
-   token). With `SIGNPATH_ORGANIZATION_ID` set the workflow submits the files and waits (up to an hour) for an
-   approver to approve the request in SignPath.
-
-### Code signing policy
-
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
-
-- Committers and reviewers: [Kiologyn](https://github.com/Kiologyn); approvers: [Kiologyn](https://github.com/Kiologyn).
-- Only builds of this repository made by its release workflow from a version tag are signed.
-- Privacy: the app sends data only where the user directs it: questions and game frames to the AI agent the
-  user chose (Claude Code or Codex, under the user's own account), the chat to the browser/phone the user
-  opened it on; it asks GitHub for the latest release to offer updates (can be turned off in the settings).
 
 ## Layout
 
